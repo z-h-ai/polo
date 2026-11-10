@@ -545,6 +545,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         onClose={membersPanelHost.closePanel}
         initialDirectory={membersPanelHost.directoryLanding}
         onboardingOpen={membersPanelHost.onboardingAutoOpen}
+        onMembersChanged={membersRoster.reload}
       />
     )
     : null

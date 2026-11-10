@@ -434,13 +434,20 @@ describe('project member commands — roster-picked, admin-authoritative', () =>
     }
   })
 
-  it('removes a member from the project only and maps prj_not_found verbatim', async () => {
+  it('removes a member from the project only and answers the FRESH roster (A1/C10)', async () => {
     const calls: Array<{ orgId: string; projectId: string; accountId: string }> = []
     setProjectMembersAdminForTests({
       ...unusedAdmin(),
       removeProjectMember: async (organizationEnterpriseId: string, projectId: string, accountId: string) => {
         calls.push({ orgId: organizationEnterpriseId, projectId, accountId })
-        return { ok: true as const }
+        // The admin DELETE answers the same shape as the list read.
+        return {
+          contractVersion: 'poo205-contract-r1',
+          projectId,
+          members: [
+            { accountId, displayName: '剩余成员', role: 'owner' as const, createdAt: '2026-11-08T00:00:00.000Z' },
+          ],
+        }
       },
     })
 
@@ -449,7 +456,15 @@ describe('project member commands — roster-picked, admin-authoritative', () =>
       projectId: PROJECT_ID,
       targetAccountId: 'user-1',
     })
-    expect(response).toEqual({ ok: true })
+    // The service passes the fresh roster through VERBATIM — the renderer
+    // replaces its state from the mutation's own answer (no second read).
+    expect(response).toEqual({
+      contractVersion: 'poo205-contract-r1',
+      projectId: PROJECT_ID,
+      members: [
+        { accountId: 'user-1', displayName: '剩余成员', role: 'owner', createdAt: '2026-11-08T00:00:00.000Z' },
+      ],
+    })
     expect(calls).toEqual([{ orgId: ORG_ID, projectId: PROJECT_ID, accountId: 'user-1' }])
 
     setProjectMembersAdminForTests({

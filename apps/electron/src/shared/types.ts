@@ -1497,7 +1497,7 @@ export interface ElectronAPI {
   pmListProjectMembers(input: import('@polo-ai/shared/protocol').PmListProjectMembersInput): Promise<import('@polo-ai/shared/protocol').ListProjectMembersResponse>
   pmAddProjectMembers(input: import('@polo-ai/shared/protocol').PmAddProjectMembersInput): Promise<import('@polo-ai/shared/protocol').ListProjectMembersResponse>
   pmUpdateProjectMember(input: import('@polo-ai/shared/protocol').PmUpdateProjectMemberInput): Promise<import('@polo-ai/shared/protocol').UpdateProjectMemberResponse>
-  pmRemoveProjectMember(input: import('@polo-ai/shared/protocol').PmRemoveProjectMemberInput): Promise<{ ok: boolean }>
+  pmRemoveProjectMember(input: import('@polo-ai/shared/protocol').PmRemoveProjectMemberInput): Promise<import('@polo-ai/shared/protocol').RemoveProjectMemberResponse>
   pmListOrganizationColleagues(input: import('@polo-ai/shared/protocol').PmListOrganizationColleaguesInput): Promise<import('@polo-ai/shared/protocol').ListOrganizationColleaguesResponse>
 
   // Negotiated R3 space list (POO-196 D6, retained) — account-scoped.

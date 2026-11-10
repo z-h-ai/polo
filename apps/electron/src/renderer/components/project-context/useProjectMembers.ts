@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PmProjectScopeInput, ProjectMember, ProjectRole } from '@polo-ai/shared/protocol'
 import { readRpcErrorCode } from '../../../shared/rpc-error-bridge'
-import { projectActionErrorKey } from '../projects/projects-api'
+import { memberActionErrorKey } from '../projects/projects-api'
 
 /**
  * POO-205 project-members state hook (Spec Q10: project members ⊆ the
@@ -145,7 +145,7 @@ export function useProjectMembers(scope: PmProjectScopeInput | null, viewerRoleH
     } catch (error) {
       if (generation !== mutateGenerationRef.current) return { ok: false, errorKey: 'projectMembers.error.scopeChanged' }
       setState(previous => ({ ...previous, mutating: false }))
-      return { ok: false, errorKey: projectActionErrorKey(readRpcErrorCode(error)) }
+      return { ok: false, errorKey: memberActionErrorKey(readRpcErrorCode(error)) }
     }
   }, [scope])
 
@@ -170,28 +170,26 @@ export function useProjectMembers(scope: PmProjectScopeInput | null, viewerRoleH
     } catch (error) {
       if (generation !== mutateGenerationRef.current) return { ok: false, errorKey: 'projectMembers.error.scopeChanged' }
       setState(previous => ({ ...previous, mutating: false }))
-      return { ok: false, errorKey: projectActionErrorKey(readRpcErrorCode(error)) }
+      return { ok: false, errorKey: memberActionErrorKey(readRpcErrorCode(error)) }
     }
   }, [scope])
 
-  /** pm:removeProjectMember — leaves the project; the fresh list answers. */
+  /** pm:removeProjectMember — leaves the project; the mutation's own answer
+   * IS the fresh roster (A1/C10), so the state is replaced without a second
+   * pm:listProjectMembers round-trip. */
   const removeMember = useCallback(async (targetAccountId: string): Promise<MemberMutationOutcome> => {
     if (!scope) return { ok: false, errorKey: 'projectMembers.error.generic' }
     const generation = mutateGenerationRef.current
     setState(previous => ({ ...previous, mutating: true }))
     try {
-      await window.electronAPI.pmRemoveProjectMember({ ...wireScope(scope), targetAccountId })
-      if (generation !== mutateGenerationRef.current) return { ok: false, errorKey: 'projectMembers.error.scopeChanged' }
-      // pm:removeProjectMember answers a bare {ok} — the fresh list needs an
-      // explicit re-read (generation-guarded, same as a manual refresh).
-      const response = await window.electronAPI.pmListProjectMembers(wireScope(scope))
+      const response = await window.electronAPI.pmRemoveProjectMember({ ...wireScope(scope), targetAccountId })
       if (generation !== mutateGenerationRef.current) return { ok: false, errorKey: 'projectMembers.error.scopeChanged' }
       setState({ items: response.members, loading: false, mutating: false, errorKey: null })
       return { ok: true }
     } catch (error) {
       if (generation !== mutateGenerationRef.current) return { ok: false, errorKey: 'projectMembers.error.scopeChanged' }
       setState(previous => ({ ...previous, mutating: false }))
-      return { ok: false, errorKey: projectActionErrorKey(readRpcErrorCode(error)) }
+      return { ok: false, errorKey: memberActionErrorKey(readRpcErrorCode(error)) }
     }
   }, [scope])
 

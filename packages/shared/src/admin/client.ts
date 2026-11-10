@@ -50,6 +50,7 @@ import {
   ProjectMutationResponseSchema,
   PublishMyAppResponseSchema,
   ProjectMigrationMappingResponseSchema,
+  RemoveProjectMemberResponseSchema,
   UpdateProjectInputSchema,
   UpdateProjectMemberInputSchema,
   UpdateProjectMemberResponseSchema,
@@ -65,6 +66,7 @@ import {
   type ProjectMigrationMappingResponse,
   type ProjectMutationResponse,
   type PublishMyAppResponse,
+  type RemoveProjectMemberResponse,
   type UpdateProjectInput,
   type UpdateProjectMemberInput,
   type UpdateProjectMemberResponse,
@@ -1984,18 +1986,20 @@ export class AdminClient {
     return this.readSuccessResponse(response, UpdateProjectMemberResponseSchema);
   }
 
-  /** DELETE .../members/{accountId} — remove from the project (organization membership untouched). */
+  /** DELETE .../members/{accountId} — remove from the project (organization
+   * membership untouched). The wire answers the FRESH roster (A1/C10): the
+   * renderer replaces its state from this response instead of re-reading. */
   async removeProjectMember(
     accessToken: string,
     organizationEnterpriseId: string,
     projectId: string,
     accountId: string,
-  ): Promise<{ ok: true }> {
-    await this.request<unknown>(
+  ): Promise<RemoveProjectMemberResponse> {
+    const response = await this.request<unknown>(
       this.organizationProjectsPath(organizationEnterpriseId, `/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(accountId)}`),
       { method: 'DELETE', accessToken },
     );
-    return { ok: true };
+    return this.readSuccessResponse(response, RemoveProjectMemberResponseSchema);
   }
 
   /** GET /api/client/organizations/{orgId}/colleagues — the ONLY roster a

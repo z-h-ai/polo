@@ -2245,6 +2245,7 @@
   "projectMembers.entryCount_one": "{{count}} miembros",
   "projectMembers.entryCount_other": "{{count}} miembros",
   "projectMembers.error.forbidden": "Solo el responsable o la gestión puede ver la lista completa y las invitaciones.",
+  "projectMembers.error.forbiddenAction": "No tienes permiso para realizar esta acción de miembros.",
   "projectMembers.error.generic": "Algo falló. Inténtalo de nuevo.",
   "projectMembers.error.lostAccess": "Ya no tienes acceso de miembro a este proyecto. El panel se vació.",
   "projectMembers.error.notFound": "Este proyecto no existe o ya no es accesible.",

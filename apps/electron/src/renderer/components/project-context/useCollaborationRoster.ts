@@ -117,9 +117,12 @@ export function useCollaborationRoster(scope: CollaborationRosterScope | null) {
   }, [scopeKey]) // eslint-disable-line react-hooks/exhaustive-deps -- `load` follows `scope`, captured by scopeKey
 
   /** Client-side name search over the loaded snapshot: a new query filters
-   * in place (no re-read — the wire channel has no `q`). */
+   * in place (no re-read — the wire channel has no `q`). The raw text is
+   * stored verbatim (C10) — matching normalizes (trim/case) at filter time,
+   * so "Al ice" still finds Alice and a whitespace-only query stays a
+   * no-op filter instead of silently rewriting the input. */
   const search = useCallback((nextQuery: string) => {
-    setQuery(nextQuery.trim().slice(0, 128))
+    setQuery(nextQuery.slice(0, 128))
   }, [])
 
   /** The full snapshot's filtered view (query applied). Kept separate from
@@ -152,5 +155,9 @@ export function useCollaborationRoster(scope: CollaborationRosterScope | null) {
     search,
     loadMore: () => {},
     retry,
-  }), [retry, scopeKey, search, state.errorKey, state.loading, state.members, state.totalActiveMembers, state.viewerRole, visibleMembers])
+    /** Unconditional re-read (C10): the members-panel mutations notify the
+     * host through onMembersChanged → reload, so the header「成员 N」count
+     * follows the panel's writes even when this projection had no error. */
+    reload: load,
+  }), [load, retry, scopeKey, search, state.errorKey, state.loading, state.members, state.totalActiveMembers, state.viewerRole, visibleMembers])
 }

@@ -2245,6 +2245,7 @@
   "projectMembers.entryCount_one": "メンバー {{count}}",
   "projectMembers.entryCount_other": "メンバー {{count}}",
   "projectMembers.error.forbidden": "完全な名簿と招待履歴を表示できるのは責任者または管理者だけです。",
+  "projectMembers.error.forbiddenAction": "このメンバー操作を実行する権限がありません。",
   "projectMembers.error.generic": "操作に失敗しました。もう一度お試しください。",
   "projectMembers.error.lostAccess": "このプロジェクトのメンバー権限がなくなったため、パネルの内容を消去しました。",
   "projectMembers.error.notFound": "このプロジェクトは存在しないか、アクセスできなくなりました。",

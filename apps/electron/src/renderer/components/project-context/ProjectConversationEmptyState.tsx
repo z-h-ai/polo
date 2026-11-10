@@ -450,6 +450,7 @@ export function ProjectConversationEmptyState({
           onClose={membersPanelHost.closePanel}
           initialDirectory={membersPanelHost.directoryLanding}
           onboardingOpen={membersPanelHost.onboardingAutoOpen}
+          onMembersChanged={membersRoster.reload}
         />
       ) : null}
     </div>

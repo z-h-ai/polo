@@ -46,6 +46,18 @@ export function projectActionErrorKeyOf(error: unknown): string {
   return projectActionErrorKey(readRpcErrorCode(error))
 }
 
+/** The members-panel mutation map (C10): a `prj_forbidden` WRITE inside the
+ * panel is the R11 role-tier verdict (only an owner may grant/change/remove
+ * an owner — admin wire A1), presented with the panel's own "no permission"
+ * copy instead of the generic project-operation one the create/settings
+ * surfaces use. Everything else classifies identically. */
+export function memberActionErrorKey(code: string | null): string {
+  if (code === 'prj_forbidden' || code === 'forbidden') {
+    return 'projectMembers.error.forbiddenAction'
+  }
+  return projectActionErrorKey(code)
+}
+
 /** The committed-organization scope envelope every pm project command needs. */
 export function organizationScope(accountId: string, productSpaceId: string, organizationEnterpriseId: string): PmOrganizationScopeInput {
   return { accountId, productSpaceId, organizationEnterpriseId }

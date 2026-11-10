@@ -2245,6 +2245,7 @@
   "projectMembers.entryCount_one": "{{count}} members",
   "projectMembers.entryCount_other": "{{count}} members",
   "projectMembers.error.forbidden": "Only the owner or a manager can see the full roster and invitations.",
+  "projectMembers.error.forbiddenAction": "You do not have permission to perform this member action.",
   "projectMembers.error.generic": "Something failed. Please try again.",
   "projectMembers.error.lostAccess": "You no longer have member access to this project. The panel has been cleared.",
   "projectMembers.error.notFound": "This project does not exist or is no longer accessible.",
