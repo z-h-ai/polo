@@ -16,8 +16,8 @@ import {
   statSync,
 } from 'fs';
 import { join } from 'path';
-import { homedir } from 'os';
 import { randomUUID } from 'crypto';
+import { CONFIG_DIR } from '../config/paths.ts';
 import { expandPath, toPortablePath } from '../utils/paths.ts';
 import { atomicWriteFileSync, readJsonFileSync } from '../utils/files.ts';
 import { getDefaultStatusConfig, saveStatusConfig, ensureDefaultIconFiles } from '../statuses/storage.ts';
@@ -32,7 +32,8 @@ import type {
   WorkspaceSummary,
 } from './types.ts';
 
-const CONFIG_DIR = join(homedir(), '.polo-ai');
+// Follows the config root (POLO_AI_CONFIG_DIR for multi-instance dev) so an
+// isolated instance never creates or scans workspaces under the real ~/.polo-ai.
 const DEFAULT_WORKSPACES_DIR = join(CONFIG_DIR, 'workspaces');
 
 // ============================================================
