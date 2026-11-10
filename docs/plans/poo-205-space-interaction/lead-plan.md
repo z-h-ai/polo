@@ -104,6 +104,12 @@ C = 客户端（POO-205-exec），A = polo-admin（admin worker）。每批独�
 - i18n 死键清理、文案统一、设计系统维护入口（「我的应用」定义、D-NAV-HEADER 技能位置）与 source-baseline 再生。
 - A 档前后对照报告。
 
+### 3.1 收口记录（2026-11-10，负责人验收后提交，均未 push）
+
+客户端 `POO-205/refactor/space-interaction`：C1 `35d6b7a2`、C2 `a0c8ff7d`、C3 `ebdd1a11`、C4 `81fd7432`、C4-fix `0a203682`、C5 `f872fd25`、C6 `1ed6d1d7`、C8 `c72136ca`（合 `05a50a55`）、C10 `07d273ea`（合 `a4460eda`）、C7a `e5a7813c`、C11 `12b58d7d`（合 `b5648932`）、C7b `6d7ac696`、C9 `01569938`、C12 `b237a200`（合 `ff7df118`）。
+admin `POO-205/integration`：A1 `d2ed1e96`、A2 `7f8e21a4`（上一轮已入库）、A3a `8ce7b784`、A3b `8c070ade`、C13 `b39ce1b7`。
+§1/§2 审计与裁决全部对账落地；M1+M2+M3 里程碑范围内的批次全部收口，M4（三身份 e2e 与 i18n 清理）待做。
+
 ## 4. 边界（本轮不做，已知）
 
 项目级 MCP 数据源与配置分级（Q13-2）；存量会话迁移接线与旧企业升级（staging）；
