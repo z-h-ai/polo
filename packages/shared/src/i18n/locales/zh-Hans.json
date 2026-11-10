@@ -958,6 +958,7 @@
   "errors.chatGptOAuthNotAvailable": "Web UI 不支持 ChatGPT OAuth。请使用桌面应用或设置 API 密钥。",
   "errors.crash.description": "请重启应用。错误已被上报。",
   "errors.crash.title": "出了点问题",
+  "errors.enterprisePersonalContextBlocked": "企业空间的会话不能使用个人工作目录或数据源",
   "errors.failedToLoadSession": "无法加载会话",
   "errors.failedToLoadSessions": "无法加载会话列表",
   "errors.failedToLoadSessionsDesc": "Polo AI 已连接，但加载会话列表失败。为避免隐藏真实错误或数据问题，此处不视为空 Workspace。",

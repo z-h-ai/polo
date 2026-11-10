@@ -1428,6 +1428,9 @@ export class ClaudeAgent extends BaseAgent {
 
       const options: Options = {
         ...this.getInvocationDefaultOptions(),
+        // POO-205 C7b (P1-5): enterprise sessions get settingSources: [] —
+        // the SDK never reads the user's personal settings cascade.
+        ...this.enterpriseSdkOptionOverrides(),
         model: effectiveModel,
         // Capture stderr from SDK subprocess for error diagnostics
         // This helps identify why sessions fail with "process exited with code 1"
@@ -3095,11 +3098,14 @@ This is a branched conversation. All prior messages in this conversation are par
    * the per-turn assembly is directly testable.
    */
   protected buildPresetAppendSystemPrompt(): string {
+    // POO-205 C7b (P1-5): an enterprise session never discovers personal
+    // AGENTS.md/CLAUDE.md files — the working-directory context prompt
+    // keys off this argument, so it reads as absent.
     const base = getSystemPrompt(
       this.pinnedPreferencesPrompt ?? undefined,
       this.config.debugMode,
       this.workspaceRootPath,
-      this.config.session?.workingDirectory,
+      this.isEnterpriseSession() ? undefined : this.config.session?.workingDirectory,
       undefined, // preset
       undefined, // backendName
       this.pinnedIncludeCoAuthoredBy ?? undefined
@@ -3108,6 +3114,20 @@ This is a branched conversation. All prior messages in this conversation are par
     return projectContext
       ? `${base}\n\n${formatProjectContextSystemAppend(projectContext)}`
       : base;
+  }
+
+  /**
+   * POO-205 C7b (P1-5): an enterprise session runs the SDK in isolation
+   * mode — `settingSources: []` stops the SDK from loading the
+   * user/filesystem/project settings cascade, which would re-attach the
+   * personal CLAUDE.md/settings.json scope the session layer keeps out.
+   * With @anthropic-ai/claude-agent-sdk 0.2.123 the option defaults to the
+   * full cascade when omitted, so the explicit empty array IS the
+   * isolation contract. Kept as a method so the per-invocation assembly
+   * is directly testable.
+   */
+  protected enterpriseSdkOptionOverrides(): Partial<Options> {
+    return this.isEnterpriseSession() ? { settingSources: [] as never[] } : {};
   }
 
   getWorkspace(): Workspace {
@@ -3319,12 +3339,22 @@ This is a branched conversation. All prior messages in this conversation are par
     isRetry: boolean;
     sessionId: string | null;
   }): string {
-    const candidates: Array<string | null | undefined> = [
-      !isRetry && this.branchFromSdkSessionId ? this.branchFromSdkCwd : null,
-      this.config.session?.sdkCwd,
-      sessionId ? this.sessionStorage.getSessionPath(this.workspaceRootPath, sessionId) : null,
-      this.workspaceRootPath,
-    ];
+    // POO-205 C7b (P1-5): an enterprise session spawns from its OWN store
+    // directory. The parent-fork cwd and a persisted sdkCwd (settable by
+    // pre-C7b sessions or a fork) are personal-scope paths the session must
+    // never run in, so both candidates are skipped — the fallback chain
+    // lands on the session folder (C5's sessionDirFor store).
+    const candidates: Array<string | null | undefined> = this.isEnterpriseSession()
+      ? [
+          sessionId ? this.sessionStorage.getSessionPath(this.workspaceRootPath, sessionId) : null,
+          this.workspaceRootPath,
+        ]
+      : [
+          !isRetry && this.branchFromSdkSessionId ? this.branchFromSdkCwd : null,
+          this.config.session?.sdkCwd,
+          sessionId ? this.sessionStorage.getSessionPath(this.workspaceRootPath, sessionId) : null,
+          this.workspaceRootPath,
+        ];
     for (const c of candidates) {
       if (isExistingDirectory(c)) return c!;
     }

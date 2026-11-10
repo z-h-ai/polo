@@ -28,6 +28,7 @@ import type { PermissionMode } from './mode-manager.ts';
 import type { LoadedSource } from '../sources/types.ts';
 import { buildCallLlmRequest, type LLMQueryRequest, type LLMQueryOptions, type LLMQueryResult } from './llm-tool.ts';
 import { getLlmConnections, getDefaultLlmConnection } from '../config/storage.ts';
+import { getProductSpaceContextStorage } from '../config/preferences.ts';
 import { loadAllSources } from '../sources/storage.ts';
 import type { ApiServerConfig } from '../mcp/mcp-pool.ts';
 
@@ -163,6 +164,31 @@ export const MINI_AGENT_MCP_KEYS = ['session'] as const;
  * - destroy(): Provider-specific cleanup
  * - runMiniCompletion(): Simple text completion using backend's auth
  */
+
+// ---------------------------------------------------------------------------
+// POO-205 C7b (P1-5): the committed-space kind reader behind
+// BaseAgent.isEnterpriseSession — same source as the session layer's
+// reader (the account's verified product-space list). Module-level seam so
+// tests never touch the preferences file.
+// ---------------------------------------------------------------------------
+type EnterpriseSessionKindReader = (accountId: string, productSpaceId: string) => string | null;
+
+const defaultEnterpriseSessionKindReader: EnterpriseSessionKindReader = (accountId, productSpaceId) => {
+  try {
+    const verified = getProductSpaceContextStorage(accountId)?.verifiedContext;
+    return verified?.list.productSpaces.find(space => space.id === productSpaceId)?.kind ?? null;
+  } catch {
+    return null;
+  }
+};
+
+let enterpriseSessionKindReader: EnterpriseSessionKindReader = defaultEnterpriseSessionKindReader;
+
+/** Test seam: pin the committed-space kind reader for one file. */
+export function setEnterpriseSessionKindReaderForTests(reader: EnterpriseSessionKindReader | null): void {
+  enterpriseSessionKindReader = reader ?? defaultEnterpriseSessionKindReader;
+}
+
 export abstract class BaseAgent implements AgentBackend {
   // ============================================================
   // Backend Identity
@@ -1294,6 +1320,25 @@ ${formattedMessages}
     this.projectContextOverride = context;
   }
 
+  // POO-205 C7b (P1-5): enterprise sessions never read personal scope
+  // ============================================================
+
+  /**
+   * Whether THIS session is an enterprise session: it carries a project
+   * binding, or its recorded product space is an enterprise space. The kind
+   * comes from the account's verified product-space list — never from the
+   * record alone. Session layer (POO-205 C7b) keeps such sessions' personal
+   * scope empty; this predicate is the backends' defense in depth (system
+   * prompt working-directory context, SDK settings cascade, spawn cwd).
+   */
+  protected isEnterpriseSession(): boolean {
+    const session = this.config.session;
+    if (!session) return false;
+    if (session.projectId) return true;
+    if (!session.productSpaceId || !session.accountId) return false;
+    return enterpriseSessionKindReader(session.accountId, session.productSpaceId) === 'enterprise';
+  }
+
   /**
    * Check if currently processing a query.
    */
@@ -1399,7 +1444,11 @@ ${formattedMessages}
   protected getSpawnSessionHelp(): SpawnSessionHelpResult {
     const connections = getLlmConnections();
     const defaultConnectionSlug = getDefaultLlmConnection();
-    const allSources = loadAllSources(this.config.workspace.rootPath);
+    // POO-205 C7b (P1-5): an enterprise session's spawn_session help lists
+    // NO personal data sources.
+    const allSources = this.isEnterpriseSession()
+      ? []
+      : loadAllSources(this.config.workspace.rootPath);
     const activeSlugs = this.sourceManager.getActiveSlugs();
 
     return {

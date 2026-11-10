@@ -584,6 +584,11 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const isProjectSession = !!sessionProductSpaceId
     && isEnterpriseSpace
     && productSpace?.activeProductSpaceId === sessionProductSpaceId
+  // POO-205 C7b (P1-5): a session bound to the committed enterprise space
+  // never reads personal scope. The composer drops the working-directory
+  // picker, the data-source picker and the personal skill/source sections of
+  // the @ menu — the same wall the server enforces on the RPCs.
+  const isEnterpriseSpaceSession = isEnterpriseSpace && !!sessionProductSpaceId
   // U13: project sessions (and the project empty state, which passes its own
   // flag) get the stable project composer presentation; the ChatPage prop
   // (its committed-scope authority) wins when provided, the structural read
@@ -2298,13 +2303,17 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               projectAssetRefsValue: isProjectSession ? projectAssetRefsValue : undefined,
               onProjectAssetRefsChange: isProjectSession ? onProjectAssetRefsChange : undefined,
               projectAssetMention,
-              sources,
+              // POO-205 C7b (P1-5): enterprise sessions get NO personal
+              // scope surfaces — empty source/skill lists (no @ menu entries)
+              // and no pickers (FreeFormInput hides them when the callbacks
+              // are absent). Personal sessions are untouched.
+              sources: isEnterpriseSpaceSession ? [] : sources,
               enabledSourceSlugs: session.enabledSourceSlugs,
-              onSourcesChange,
-              skills,
+              onSourcesChange: isEnterpriseSpaceSession ? undefined : onSourcesChange,
+              skills: isEnterpriseSpaceSession ? [] : skills,
               workspaceId,
-              workingDirectory,
-              onWorkingDirectoryChange,
+              workingDirectory: isEnterpriseSpaceSession ? undefined : workingDirectory,
+              onWorkingDirectoryChange: isEnterpriseSpaceSession ? undefined : onWorkingDirectoryChange,
               disableSend: disableSend || connectionUnavailable,
               connectionUnavailable,
               isEmptySession: session.messages.length === 0,

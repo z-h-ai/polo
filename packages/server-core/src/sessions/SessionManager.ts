@@ -31,7 +31,7 @@ import {
   type BackendHostRuntimeContext,
   type PostInitResult,
 } from '@polo-ai/shared/agent/backend'
-import { getAdminUrl, getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaultThinkingLevel, isGenerativeUiCanvasEnabled, isGenerativeUiInlineEnabled, isWebAppArtifactPolicyEnabled, resetManagedAnthropicAuthEnvVars, resolveMidStreamBehavior } from '@polo-ai/shared/config'
+import { getAdminUrl, getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaultThinkingLevel, getProductSpaceContextStorage, isGenerativeUiCanvasEnabled, isGenerativeUiInlineEnabled, isWebAppArtifactPolicyEnabled, resetManagedAnthropicAuthEnvVars, resolveMidStreamBehavior } from '@polo-ai/shared/config'
 import { PrivilegedExecutionBroker } from '@polo-ai/server-core/services'
 import { isValidWorkingDirectory } from '../utils/path-validation'
 import {
@@ -1553,6 +1553,51 @@ const DEFAULT_TOKEN_USAGE = {
  * Convert a ManagedSession to a renderer-side Session object.
  * Uses pickSessionFields() for persistent fields so new fields propagate automatically.
  */
+// ---------------------------------------------------------------------------
+// POO-205 C7b (P1-5): enterprise sessions never read personal scope
+// ---------------------------------------------------------------------------
+
+/**
+ * The committed-space kind reader behind `isEnterpriseSessionRecord` — reads
+ * the account's verified product-space list, the same source the canonical
+ * Skill gate and the C7a project-context resolver use. Module-level seam so
+ * tests never touch the preferences file.
+ */
+type EnterpriseSessionSpaceKindReader = (accountId: string, productSpaceId: string) => string | null
+
+const defaultEnterpriseSessionSpaceKindReader: EnterpriseSessionSpaceKindReader = (accountId, productSpaceId) => {
+  try {
+    const verified = getProductSpaceContextStorage(accountId)?.verifiedContext
+    return verified?.list.productSpaces.find(space => space.id === productSpaceId)?.kind ?? null
+  } catch {
+    return null
+  }
+}
+
+let enterpriseSessionSpaceKindReader: EnterpriseSessionSpaceKindReader = defaultEnterpriseSessionSpaceKindReader
+
+/** Test seam: pin the committed-space kind reader for one file. */
+export function setEnterpriseSessionSpaceKindReaderForTests(reader: EnterpriseSessionSpaceKindReader | null): void {
+  enterpriseSessionSpaceKindReader = reader ?? defaultEnterpriseSessionSpaceKindReader
+}
+
+/**
+ * Whether a session record (SessionMetadata, ManagedSession or StoredSession —
+ * anything carrying the trusted bindings) is an ENTERPRISE session: it carries
+ * a project binding, or its recorded product space is an enterprise space.
+ * Personal-space sessions never match, whatever the caller claims — the kind
+ * comes from the account's verified space list, not from the record itself.
+ */
+export function isEnterpriseSessionRecord(record: {
+  projectId?: string
+  productSpaceId?: string
+  accountId?: string
+}): boolean {
+  if (record.projectId) return true
+  if (!record.productSpaceId || !record.accountId) return false
+  return enterpriseSessionSpaceKindReader(record.accountId, record.productSpaceId) === 'enterprise'
+}
+
 function managedToSession(
   m: ManagedSession,
   storage: SessionStorage,
@@ -3320,6 +3365,8 @@ export class SessionManager implements ISessionManager {
    */
   private async reloadSessionSources(managed: ManagedSession): Promise<void> {
     if (this.cliAuthority?.desktopManaged) return
+    // POO-205 C7b (P1-5): an enterprise session has no sources to reload.
+    if (isEnterpriseSessionRecord(managed)) return
     if (!managed.agent) return  // No agent = nothing to update (fresh build on next message)
 
     const workspaceRootPath = managed.workspace.rootPath
@@ -3520,9 +3567,17 @@ export class SessionManager implements ISessionManager {
           // Create managed session from metadata only (messages lazy-loaded on demand)
           // This dramatically reduces memory usage at startup - messages are loaded
           // when getSession() is called for a specific session
+          // POO-205 C7b (P1-5): an enterprise session restored from disk keeps
+          // NO personal scope — neither the workspace default working directory
+          // nor a personal path a pre-C7b header still carries. The in-memory
+          // record reads as empty; the on-disk header is left untouched and is
+          // rewritten without it on the session's next natural persist.
+          const enterprisePersonalContextBlocked = isEnterpriseSessionRecord(meta)
           const managed = createManagedSession(meta, workspace, {
             enabledSourceSlugs: undefined,  // Loaded with messages
-            workingDirectory: meta.workingDirectory ?? wsDefaultWorkingDir,
+            workingDirectory: enterprisePersonalContextBlocked
+              ? undefined
+              : meta.workingDirectory ?? wsDefaultWorkingDir,
           })
 
           // Migration: clear orphaned llmConnection references (e.g., after connection was deleted)
@@ -3636,7 +3691,11 @@ export class SessionManager implements ISessionManager {
       // Deferred-load fields (intentionally undefined after startup, see
       // loadSessionsFromDisk). Populate from disk only if not already set in
       // memory — a caller may have mutated them via setSessionSources etc.
-      if (managed.enabledSourceSlugs === undefined) managed.enabledSourceSlugs = stored.enabledSourceSlugs
+      // POO-205 C7b (P1-5): an enterprise session never picks up the data
+      // sources a pre-C7b header recorded — personal scope stays personal.
+      if (managed.enabledSourceSlugs === undefined && !isEnterpriseSessionRecord(managed)) {
+        managed.enabledSourceSlugs = stored.enabledSourceSlugs
+      }
       if (managed.lastReadMessageId === undefined) managed.lastReadMessageId = stored.lastReadMessageId
       if (managed.hasUnread === undefined) managed.hasUnread = stored.hasUnread
       if (managed.sharedUrl === undefined) managed.sharedUrl = stored.sharedUrl
@@ -3837,8 +3896,10 @@ export class SessionManager implements ISessionManager {
     if (result.success && result.sourceSlug && managed.agent) {
       const workspaceRootPath = managed.workspace.rootPath
       const sessionPath = this.sessionStorage.getSessionPath(this.storeRootForManaged(managed), managed.id)
-      const enabledSlugs = this.cliAuthority?.desktopManaged ? [] : managed.enabledSourceSlugs || []
-      const allSources = this.cliAuthority?.desktopManaged ? [] : loadAllSources(workspaceRootPath)
+      // POO-205 C7b (P1-5): an enterprise session sees NO personal sources.
+      const personalContextBlocked = this.cliAuthority?.desktopManaged || isEnterpriseSessionRecord(managed)
+      const enabledSlugs = personalContextBlocked ? [] : managed.enabledSourceSlugs || []
+      const allSources = personalContextBlocked ? [] : loadAllSources(workspaceRootPath)
       const enabledSources = allSources.filter(s =>
         enabledSlugs.includes(s.config.slug) && isSourceUsable(s)
       )
@@ -4168,7 +4229,11 @@ export class SessionManager implements ISessionManager {
       managed.tokenUsage = storedSession.tokenUsage
       managed.lastReadMessageId = storedSession.lastReadMessageId
       managed.hasUnread = storedSession.hasUnread  // Explicit unread flag for NEW badge state machine
-      managed.enabledSourceSlugs = storedSession.enabledSourceSlugs
+      // POO-205 C7b (P1-5): an enterprise session never restores the data
+      // sources a pre-C7b header recorded — personal scope stays personal.
+      managed.enabledSourceSlugs = isEnterpriseSessionRecord(managed)
+        ? undefined
+        : storedSession.enabledSourceSlugs
       managed.sharedUrl = storedSession.sharedUrl
       managed.sharedId = storedSession.sharedId
       managed.sharedWriteToken = storedSession.sharedWriteToken
@@ -4386,7 +4451,8 @@ export class SessionManager implements ISessionManager {
     // Get default model from workspace config (used when no session-specific model is set)
     const defaultModel = wsConfig?.defaults?.model
     // Get default enabled sources from workspace config
-    const defaultEnabledSourceSlugs = options?.enabledSourceSlugs ?? wsConfig?.defaults?.enabledSourceSlugs
+    // (let: C7b zeroes it for enterprise sessions after the binding gate below)
+    let defaultEnabledSourceSlugs = options?.enabledSourceSlugs ?? wsConfig?.defaults?.enabledSourceSlugs
 
     // Resolve model tier hints ('fast' / 'default') to actual model IDs.
     // EditPopover uses tier hints instead of hardcoded Anthropic model names
@@ -4749,6 +4815,20 @@ export class SessionManager implements ISessionManager {
       } else {
         throw new CodedError('PROJECT_CONTEXT_UNAVAILABLE', SESSION_PROJECT_ERROR_MESSAGES.PROJECT_CONTEXT_UNAVAILABLE)
       }
+    }
+
+    // POO-205 C7b (P1-5): an enterprise session never inherits personal
+    // scope. The workspace default working directory, any caller-supplied
+    // working directory and the workspace default data sources are all
+    // PERSONAL state — the session runs from its own store directory with
+    // no sources, so AGENTS.md/CLAUDE.md discovery (which keys off the
+    // session's working directory) never sees personal files either.
+    // The branch/project gates above have already established the space
+    // kind; a project binding alone is equally decisive (assertSession-
+    // ProjectBinding keeps projectId out of the personal space).
+    if (activeSpaceKind === 'enterprise' || !!effectiveProjectId) {
+      resolvedWorkingDir = undefined
+      defaultEnabledSourceSlugs = undefined
     }
 
     // POO-205 (G4): a project session's physical store is its project root —
@@ -6182,8 +6262,11 @@ export class SessionManager implements ISessionManager {
       // ============================================================
 
       const sessionPath = this.sessionDirFor(managed)
-      const enabledSlugs = this.cliAuthority?.desktopManaged ? [] : managed.enabledSourceSlugs || []
-      const allSources = this.cliAuthority?.desktopManaged ? [] : loadAllSources(managed.workspace.rootPath)
+      // POO-205 C7b (P1-5): an enterprise session sees NO personal sources —
+      // nothing to enable and nothing to expose as context.
+      const personalContextBlocked = this.cliAuthority?.desktopManaged || isEnterpriseSessionRecord(managed)
+      const enabledSlugs = personalContextBlocked ? [] : managed.enabledSourceSlugs || []
+      const allSources = personalContextBlocked ? [] : loadAllSources(managed.workspace.rootPath)
       const enabledSources = allSources.filter(s =>
         enabledSlugs.includes(s.config.slug) && isSourceUsable(s)
       )
@@ -7295,6 +7378,9 @@ export class SessionManager implements ISessionManager {
       // bypassing activateSourceInSessionFn, so the guard must live here.
       managed.agent.onSourceActivationRequest = this.guardManagedCallback(managed, 'agent.onSourceActivationRequest', async (sourceSlug: string): Promise<boolean> => {
         if (this.cliAuthority?.desktopManaged) return false
+        // POO-205 C7b (P1-5): an enterprise session never auto-enables a
+        // source — its data-source list is permanently empty.
+        if (isEnterpriseSessionRecord(managed)) return false
         sessionLog.info(`Source activation request for session ${managed.id}:`, sourceSlug)
 
         const workspaceRootPath = managed.workspace.rootPath
@@ -8127,6 +8213,15 @@ export class SessionManager implements ISessionManager {
     if (!managed) {
       throw new Error(`Session not found: ${sessionId}`)
     }
+    // POO-205 C7b (P1-5): an enterprise session's data-source list is
+    // permanently empty — personal sources can never be attached. The
+    // composer hides the control; this refuses the direct RPC.
+    if (isEnterpriseSessionRecord(managed)) {
+      throw new CodedError(
+        'ENTERPRISE_PERSONAL_CONTEXT_BLOCKED',
+        SESSION_PROJECT_ERROR_MESSAGES.ENTERPRISE_PERSONAL_CONTEXT_BLOCKED,
+      )
+    }
 
     const workspaceRootPath = managed.workspace.rootPath
     sessionLog.info(`Setting sources for session ${sessionId}:`, sourceSlugs)
@@ -8159,7 +8254,12 @@ export class SessionManager implements ISessionManager {
       }
 
       // Set all sources for context (agent sees full list with descriptions, including built-ins)
-      const allSources = this.cliAuthority?.desktopManaged ? [] : loadAllSources(workspaceRootPath)
+      // POO-205 C7b (P1-5): an enterprise session gets an EMPTY context list —
+      // its data sources are permanently personal-free. (Unreachable today:
+      // setSessionSources refuses enterprise sessions at the door.)
+      const allSources = this.cliAuthority?.desktopManaged || isEnterpriseSessionRecord(managed)
+        ? []
+        : loadAllSources(workspaceRootPath)
       managed.agent.setAllSources(allSources)
 
       // Set active source servers (tools are only available from these)
@@ -8495,6 +8595,17 @@ export class SessionManager implements ISessionManager {
   updateWorkingDirectory(sessionId: string, path: string): void {
     const managed = this.sessions.get(sessionId)
     if (managed) {
+      // POO-205 C7b (P1-5): an enterprise session's working directory is
+      // permanently empty — a personal path here would drag the user's
+      // AGENTS.md/CLAUDE.md cascade and filesystem scope back into the
+      // model's view. The composer hides the control; this is the server
+      // side of the same wall.
+      if (isEnterpriseSessionRecord(managed)) {
+        throw new CodedError(
+          'ENTERPRISE_PERSONAL_CONTEXT_BLOCKED',
+          SESSION_PROJECT_ERROR_MESSAGES.ENTERPRISE_PERSONAL_CONTEXT_BLOCKED,
+        )
+      }
       const validation = isValidWorkingDirectory(path)
       if (!validation.valid) {
         sessionLog.warn(`Session ${sessionId}: rejected working directory "${path}" — ${validation.reason}`)
@@ -9745,7 +9856,10 @@ export class SessionManager implements ISessionManager {
     try {
 
     const workspaceRootPath = managed.workspace.rootPath
-    const enabledSlugs = this.cliAuthority?.desktopManaged ? [] : managed.enabledSourceSlugs ?? []
+    // POO-205 C7b (P1-5): an enterprise session never carries sources.
+    const enabledSlugs = this.cliAuthority?.desktopManaged || isEnterpriseSessionRecord(managed)
+      ? []
+      : managed.enabledSourceSlugs ?? []
     const hasSources = enabledSlugs.length > 0
 
     // Load enabled sources up-front so we can refresh tokens BEFORE getOrCreateAgent
@@ -9863,7 +9977,11 @@ export class SessionManager implements ISessionManager {
       }
 
       // Always set all sources for context (even if none are enabled), including built-ins
-      const allSources = this.cliAuthority?.desktopManaged ? [] : loadAllSources(workspaceRootPath)
+      // POO-205 C7b (P1-5): an enterprise session gets an EMPTY context list —
+      // personal sources must never reach its model.
+      const allSources = this.cliAuthority?.desktopManaged || isEnterpriseSessionRecord(managed)
+        ? []
+        : loadAllSources(workspaceRootPath)
       agent.setAllSources(allSources)
       sendSpan.mark('sources.loaded')
 
@@ -12965,7 +13083,11 @@ export class SessionManager implements ISessionManager {
         const workspaceRootPath = managed.workspace.rootPath
         let toolDisplayMeta: ToolDisplayMeta | undefined
         if (toolInput && Object.keys(toolInput).length > 0) {
-          const allSources = this.cliAuthority?.desktopManaged ? [] : loadAllSources(workspaceRootPath)
+          // POO-205 C7b (P1-5): tool display resolution never reads personal
+          // sources for an enterprise session.
+          const allSources = this.cliAuthority?.desktopManaged || isEnterpriseSessionRecord(managed)
+            ? []
+            : loadAllSources(workspaceRootPath)
           toolDisplayMeta = await resolveToolDisplayMeta(event.toolName, toolInput, workspaceRootPath, allSources)
           assertCurrent()
         }
@@ -13118,7 +13240,10 @@ export class SessionManager implements ISessionManager {
           // locate this message by toolUseId and update it with input/intent/displayMeta.
           sessionLog.info(`RESULT WITHOUT START: toolUseId=${event.toolUseId}, toolName=${toolName} (creating message from result)`)
           const fallbackWorkspaceRootPath = managed.workspace.rootPath
-          const fallbackSources = loadAllSources(fallbackWorkspaceRootPath)
+          // POO-205 C7b (P1-5): same enterprise gate as the tool_start path.
+          const fallbackSources = this.cliAuthority?.desktopManaged || isEnterpriseSessionRecord(managed)
+            ? []
+            : loadAllSources(fallbackWorkspaceRootPath)
           const fallbackToolDisplayMeta = await resolveToolDisplayMeta(toolName, undefined, fallbackWorkspaceRootPath, fallbackSources)
           assertCurrent()
 
@@ -14075,8 +14200,15 @@ export class SessionManager implements ISessionManager {
         previousPermissionMode: header.previousPermissionMode,
         sessionStatus: header.sessionStatus,
         labels: header.labels,
-        enabledSourceSlugs: header.enabledSourceSlugs,
-        workingDirectory: header.workingDirectory,
+        // POO-205 C7b (P1-5): an enterprise session imports with NO personal
+        // scope — a bundle header's working directory and data sources are
+        // the SENDER's personal state, never this space's.
+        enabledSourceSlugs: importedProjectId || importSpaceKind === 'enterprise'
+          ? undefined
+          : header.enabledSourceSlugs,
+        workingDirectory: importedProjectId || importSpaceKind === 'enterprise'
+          ? undefined
+          : header.workingDirectory,
         model: header.model,
         llmConnection: header.llmConnection,
         connectionLocked: header.connectionLocked,

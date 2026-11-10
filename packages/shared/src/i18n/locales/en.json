@@ -958,6 +958,7 @@
   "errors.chatGptOAuthNotAvailable": "ChatGPT OAuth is not available in the web UI. Use the desktop app or set up an API key instead.",
   "errors.crash.description": "Please restart the app. The error has been reported.",
   "errors.crash.title": "Something went wrong",
+  "errors.enterprisePersonalContextBlocked": "Sessions in an enterprise space can't use your personal working directory or data sources",
   "errors.failedToLoadSession": "Failed to load session",
   "errors.failedToLoadSessions": "Failed to load sessions",
   "errors.failedToLoadSessionsDesc": "Polo AI could connect, but loading the session list failed. This is not being treated as an empty workspace to avoid hiding a real bug or data problem.",

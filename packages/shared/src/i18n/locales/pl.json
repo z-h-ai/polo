@@ -964,6 +964,7 @@
   "errors.chatGptOAuthNotAvailable": "ChatGPT OAuth nie jest dostępne w interfejsie web. Użyj aplikacji desktopowej lub skonfiguruj klucz API.",
   "errors.crash.description": "Uruchom aplikację ponownie. Błąd został zgłoszony.",
   "errors.crash.title": "Coś poszło nie tak",
+  "errors.enterprisePersonalContextBlocked": "Sesje w przestrzeni firmowej nie mogą korzystać z osobistego katalogu roboczego ani osobistych źródeł danych",
   "errors.failedToLoadSession": "Nie udało się załadować sesji",
   "errors.failedToLoadSessions": "Nie udało się załadować sesji",
   "errors.failedToLoadSessionsDesc": "Polo AI nawiązał połączenie, ale ładowanie listy sesji nie powiodło się. Nie jest to traktowane jako pusty Workspace, aby uniknąć ukrycia prawdziwego błędu lub problemu z danymi.",

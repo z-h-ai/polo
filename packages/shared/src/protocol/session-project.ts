@@ -10,12 +10,19 @@
  * POO-205 C7a adds PROJECT_CONTEXT_UNAVAILABLE: the server could not re-prove
  * the caller's membership in the project (network/5xx/timeout/no session) —
  * creation refuses rather than trusting the renderer-supplied snapshot.
+ *
+ * POO-205 C7b adds ENTERPRISE_PERSONAL_CONTEXT_BLOCKED: an enterprise session
+ * never touches personal scope — working directory (workspace default or
+ * caller-supplied), AGENTS.md/CLAUDE.md discovery, personal data sources and
+ * personal Skills are all out of reach. Mutating RPCs that would attach any
+ * of those (updateWorkingDirectory, setSources) refuse with this code.
  */
 export const SESSION_PROJECT_ERROR_CODES = [
   'PROJECT_CONTEXT_REQUIRED',
   'PROJECT_BINDING_REJECTED_IN_PERSONAL_SPACE',
   'BRANCH_PROJECT_MISMATCH',
   'PROJECT_CONTEXT_UNAVAILABLE',
+  'ENTERPRISE_PERSONAL_CONTEXT_BLOCKED',
 ] as const
 export type SessionProjectErrorCode = (typeof SESSION_PROJECT_ERROR_CODES)[number]
 
@@ -30,4 +37,5 @@ export const SESSION_PROJECT_ERROR_MESSAGES: Record<SessionProjectErrorCode, str
   PROJECT_BINDING_REJECTED_IN_PERSONAL_SPACE: '个人空间不支持项目会话',
   BRANCH_PROJECT_MISMATCH: '不能把会话分支到其他项目',
   PROJECT_CONTEXT_UNAVAILABLE: '暂时无法确认项目信息，请检查网络后重试',
+  ENTERPRISE_PERSONAL_CONTEXT_BLOCKED: '企业空间的会话不能使用个人工作目录或数据源',
 }

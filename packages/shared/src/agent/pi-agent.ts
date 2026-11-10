@@ -2450,11 +2450,14 @@ export class PiAgent extends BaseAgent {
       }
 
       // Build system prompt
+      // POO-205 C7b (P1-5): an enterprise session never discovers personal
+      // AGENTS.md/CLAUDE.md files — the working-directory context prompt
+      // keys off this argument, so it reads as absent.
       const baseSystemPrompt = getSystemPrompt(
         undefined, // pinnedPreferencesPrompt
         this.config.debugMode,
         this.config.workspace.rootPath,
-        this.config.session?.workingDirectory,
+        this.isEnterpriseSession() ? undefined : this.config.session?.workingDirectory,
         this.config.systemPromptPreset,
         'Polo AI Backend', // backendName
         getCoAuthorPreference() // respect user's includeCoAuthoredBy preference (#576)
@@ -3064,6 +3067,12 @@ export class PiAgent extends BaseAgent {
    * BaseAgent stores paths with tilde (~) but Node.js spawn doesn't expand tilde.
    */
   private resolvedCwd(): string {
+    // POO-205 C7b (P1-5): an enterprise session spawns its subprocess in its
+    // OWN store directory (C5's sessionDirFor) — never in a personal path.
+    if (this.isEnterpriseSession()) {
+      const sessionDir = this.resolveSessionDir();
+      if (sessionDir) return sessionDir;
+    }
     const wd = this.workingDirectory;
     if (wd.startsWith('~/')) return join(homedir(), wd.slice(2));
     if (wd === '~') return homedir();
