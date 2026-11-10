@@ -90,8 +90,6 @@ export function ProjectConversationEmptyState({
   const { t } = useTranslation()
   const { onCreateSession, onSendMessage, filePreview, filePreviewVisible } = useAppShellContext()
   const [projectTab, setProjectTab] = useState<ProjectContextTab>('messages')
-  const draftKey = `${accountId}:${productSpaceId}`
-  const draft = readScopeDraft(draftKey)
   const submittingRef = useRef(false)
 
   // POO-205: the project this surface binds to is the ENTERED project — the
@@ -101,6 +99,11 @@ export function ProjectConversationEmptyState({
   // chat-only face.
   const activeProject = getActiveProjectFor(accountId, productSpaceId)
   const projectName = activeProject?.name ?? fallbackProjectName
+  // POO-205 C3: the composer draft (and its blocked-send notice marker) is
+  // keyed PER PROJECT — project A's half-typed draft must never resurface on
+  // project B's tab (one organization space hosts many projects).
+  const draftKey = emptyDraftKey(accountId, productSpaceId, activeProject?.projectId ?? null)
+  const draft = readScopeDraft(draftKey)
   const projectScope = activeProject && enterpriseId
     ? {
       accountId,
@@ -153,7 +156,9 @@ export function ProjectConversationEmptyState({
   entryStateRef.current = entryState
   const setSendNotices = useSetAtom(projectEntrySendNoticesAtom)
   const sendNotices = useAtomValue(projectEntrySendNoticesAtom)
-  const composerDraftKey = emptyDraftKey(accountId, productSpaceId)
+  // ONE draft scope identity for the whole surface: the scope draft map and
+  // the entry-transaction notice markers address the SAME per-project key.
+  const composerDraftKey = draftKey
 
   const handleInputChange = useCallback((value: string) => {
     draft.input = value

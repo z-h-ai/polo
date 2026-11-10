@@ -97,9 +97,14 @@ export interface ProjectEntrySendNotice {
 
 export const EMPTY_DRAFT_KEY_PREFIX = 'empty:'
 
-/** The empty-state composer draft key for a scope. */
-export function emptyDraftKey(accountId: string, productSpaceId: string): string {
-  return `${EMPTY_DRAFT_KEY_PREFIX}${accountId}:${productSpaceId}`
+/** The empty-state composer draft key for a scope. POO-205 C3: pass the
+ * entered project id — drafts (and their blocked-send notice markers) must
+ * never leak across projects sharing one organization space. Omitting the
+ * project id keeps the pre-C3 key shape (a scope with no entered project). */
+export function emptyDraftKey(accountId: string, productSpaceId: string, projectId?: string | null): string {
+  return projectId
+    ? `${EMPTY_DRAFT_KEY_PREFIX}${accountId}:${productSpaceId}:${projectId}`
+    : `${EMPTY_DRAFT_KEY_PREFIX}${accountId}:${productSpaceId}`
 }
 
 /**

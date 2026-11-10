@@ -2,10 +2,7 @@ import { useStore } from 'jotai'
 
 type JotaiStore = ReturnType<typeof useStore>
 import { useCallback } from 'react'
-import { useTranslation } from 'react-i18next'
-import { toast } from 'sonner'
 import { openProjectTabAtom } from '@/atoms/tab-browser'
-import { navigate, routes } from '@/lib/navigate'
 import { recordProjectVisit } from '@/lib/project-directory'
 import { activeProjectRefOf, setActiveProject, type ActiveProjectRef, type LightweightProjectInput } from './projects-bus'
 
@@ -15,11 +12,12 @@ export type { LightweightProjectInput }
  * POO-205 — LIGHTWEIGHT project entry (Spec Q8/Q10 adjudication).
  *
  * Entering a project of the ALREADY-COMMITTED organization is a navigation,
- * never a space-switch transaction: publish the active project, land the
- * conversation layout on the project's most recent session (or the editable
- * empty state), activate the assistant tab and record the device-local visit
- * order — then open the project home (detail view). Zero-write except the
- * visit record: entering must not create sessions.
+ * never a space-switch transaction: open/activate the project tab, publish
+ * the active project (NavigationProvider's project-landing invariant then
+ * lands the conversation on the project's stored selection → most recent
+ * real conversation → the editable empty state) and record the device-local
+ * visit order. Zero-write except the visit record: entering must not create
+ * sessions.
  *
  * The space-switch path (committed space ≠ the project's organization) keeps
  * using the existing useProjectEntry transaction — this module never calls
@@ -68,16 +66,101 @@ export function selectProjectSessionByProjectId(
   return { kind: 'recent', sessionId: decorated[0]!.session.id }
 }
 
+export type ProjectLanding =
+  | { kind: 'session'; sessionId: string; source: 'stored' | 'recent' }
+  | { kind: 'empty' }
+
+/** POO-205 §10 (C3): the three-level PROJECT LANDING for sessions navigation
+ * while a project tab is active — the pure resolver behind
+ * NavigationProvider's invariant (the ONLY enforcement point). Order:
+ * the project's stored last selection (still present, not hidden/archived,
+ * THIS project) → the project's most recent real conversation (an empty
+ * session is not history) → the project empty state. Sessions of OTHER
+ * projects never land. */
+export function resolveProjectLanding(
+  metas: Parameters<typeof selectProjectSessionByProjectId>[0],
+  projectId: string,
+  storedId: string | null,
+): ProjectLanding {
+  if (storedId) {
+    const stored = metas.find(meta =>
+      meta.id === storedId
+      && meta.projectId === projectId
+      && !meta.hidden
+      && meta.isArchived !== true
+    )
+    if (stored) return { kind: 'session', sessionId: storedId, source: 'stored' }
+  }
+  const recent = selectProjectSessionByProjectId(metas, projectId)
+  if (recent.kind === 'recent') return { kind: 'session', sessionId: recent.sessionId, source: 'recent' }
+  return { kind: 'empty' }
+}
+
+/** The focused session projected against the active project (NavigationProvider
+ * feeds this from the meta map). `unknown` = details exist but the session's
+ * meta has not landed in the map yet — a fresh creation or a project switch
+ * the meta cannot vouch for. */
+export type ProjectFocusedSession =
+  | 'none'      // no details selected
+  | 'unknown'   // details set, meta not (yet) in the map
+  | 'foreign'   // meta known, belongs to ANOTHER project
+  | 'mine'      // meta known, belongs to the active project
+
+/** POO-205 C3-fix: whether the project-landing invariant must act. Pure.
+ *
+ * - A PROJECT TRANSITION (entering, tab A⇄B, restart restore) lands the
+ *   project conversation NO MATTER which navigator the panel is showing —
+ *   the only pass is a focused session that is already provably the new
+ *   project's. `unknown` is NOT a pass: a just-switched project cannot be
+ *   vouched for by a meta that is not in the map.
+ * - WITHIN the same project the invariant stays surgical (C3 behavior): it
+ *   only corrects a foreign session in the sessions navigator; sources/
+ *   skills/settings pages the user opened inside the project are never
+ *   yanked back, an unknown meta is left alone, and details=null over an
+ *   empty project IS the correct landing.
+ */
+export function shouldLandProject(input: {
+  /** activeProjectId differs from the last project this effect landed. */
+  transition: boolean
+  /** The focused panel currently shows the sessions navigator. */
+  isSessions: boolean
+  details: ProjectFocusedSession
+  /** resolveProjectLanding answers a session (not the empty state). */
+  hasLandingSession: boolean
+}): boolean {
+  if (input.transition) {
+    return input.details !== 'mine'
+  }
+  if (!input.isSessions) return false
+  switch (input.details) {
+    case 'foreign':
+      return true
+    case 'unknown':
+    case 'mine':
+      return false
+    case 'none':
+      return input.hasLandingSession
+  }
+}
+
 /** Enter a project of the committed organization (lightweight). Returns the
  * published ActiveProjectRef (or null when the caller's scope was incomplete
- * — the click is then a no-op, never a fake navigation). */
+ * — the click is then a no-op, never a fake navigation).
+ *
+ * POO-205 C3: this function NO LONGER navigates. The conversation landing
+ * (stored selection → recent real conversation → empty state) belongs to
+ * NavigationProvider's project-landing invariant, keyed off the active
+ * project THIS function publishes — one enforcement point instead of two
+ * racing navigators (tab A ⇄ tab B switching never keeps the previous
+ * project's conversation). */
 export async function enterProjectLightweight(accountId: string, project: LightweightProjectInput, store?: JotaiStore): Promise<ActiveProjectRef | null> {
   if (!accountOk(accountId) || !project.id || !project.organizationProductSpaceId) return null
   const ref = activeProjectRefOf(accountId, project)
   // Spec §10: entering a project OPENS ITS TAB (title = project name). The
   // App-level effect on the active tab re-publishes the active project from
-  // the tab payload; this eager setActiveProject keeps the pre-navigation
-  // zero-write first send bound even before that effect settles.
+  // the tab payload; this eager setActiveProject flips the NavigationProvider
+  // project-landing invariant immediately (tab A → tab B lands B's session,
+  // not A's) and keeps the pre-navigation zero-write first send bound.
   // The caller's jotai store (useStore) — the app runs inside a Jotai
   // Provider, so getDefaultStore would be a DIFFERENT store the UI never reads.
   const jotai = store ?? (() => { throw new Error('project entry requires the jotai store') })()
@@ -91,22 +174,6 @@ export async function enterProjectLightweight(accountId: string, project: Lightw
     myRole: project.myRole,
   })
   setActiveProject(ref)
-  // The conversation layout rides the committed org workspace: land on the
-  // project's most recent session, or the zero-write empty state (the first
-  // send there creates the session WITH the active project attached).
-  try {
-    const sessions = await window.electronAPI.getSessions()
-    const selection = selectProjectSessionByProjectId(sessions, project.id)
-    if (selection.kind === 'recent') {
-      navigate(routes.view.allSessions(selection.sessionId))
-    } else {
-      navigate(routes.view.allSessions(), { skipAutoSelect: true })
-    }
-  } catch {
-    // The history read failing must not block the entry: the project home
-    // still opens, the session list keeps whatever it already shows.
-    navigate(routes.view.allSessions(), { skipAutoSelect: true })
-  }
   recordProjectVisit(accountId, project.id)
   return ref
 }
@@ -116,24 +183,20 @@ function accountOk(accountId: string): boolean {
 }
 
 /**
- * The React binding: feeds the tab-activation capability + the toast/translate
- * channel the lightweight entry needs, and exposes the enter callback. The
- * HomePage cards share ONE
- * instance through the module store, so the capability stays live wherever
- * this hook is mounted.
+ * The React binding: the enter callback bound to the CALLER'S jotai store.
+ * The HomePage cards share ONE instance through the module store, so the
+ * capability stays live wherever this hook is mounted. (The historyFailed
+ * toast retired with the entry's own history read — POO-205 C3 moved the
+ * conversation landing into NavigationProvider's invariant, which owns its
+ * own failure faces.)
  */
 export function useProjectLightweightEntry() {
-  const { t } = useTranslation()
   // The caller's jotai store: the app runs inside a JotaiProvider, so the
   // project-tab write MUST ride the context store (getDefaultStore would be
   // a store the UI never reads).
   const store = useStore()
   const enter = useCallback((accountId: string, project: LightweightProjectInput): Promise<ActiveProjectRef | null> => {
-    const result = enterProjectLightweight(accountId, project, store)
-    void result.catch(() => {
-      toast.error(t('project.entry.historyFailed'))
-    })
-    return result
-  }, [store, t])
+    return enterProjectLightweight(accountId, project, store)
+  }, [store])
   return { enterProject: enter }
 }

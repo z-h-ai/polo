@@ -16,7 +16,7 @@
  */
 
 import * as React from 'react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { useAtomValue } from 'jotai'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -50,6 +50,7 @@ import type { ExecutionEntry } from '../automations/types'
 import { automationsAtom } from '@/atoms/automations'
 import { SendResourceToWorkspaceDialog, type SendResourceType } from './SendResourceToWorkspaceDialog'
 import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
+import { subscribeActiveProject, getActiveProjectRaw } from '@/components/projects/projects-bus'
 import { ProjectConversationEmptyState } from '@/components/project-context/ProjectConversationEmptyState'
 
 export interface MainContentPanelProps {
@@ -154,6 +155,10 @@ export function MainContentPanel({
   // conversation empty state below — hooks stay top-level (rules of hooks).
   const productSpaceScope = useOptionalProductSpaceContext()
   const activeProjectSpace = productSpaceScope?.activeProductSpace
+  // POO-205 C3: the empty state binds to the ENTERED project — keying it by
+  // projectId remounts the whole surface on a project switch (drafts, roster
+  // state and tabs reset with the project instead of leaking across).
+  const activeProject = useSyncExternalStore(subscribeActiveProject, getActiveProjectRaw)
   // UB2 (U3/U10): the shared entry transaction state. A committed entry whose
   // fresh history read failed pins the persistent history-error face over
   // this scope's conversation area (no sendable empty state, no old project's
@@ -515,6 +520,7 @@ export function MainContentPanel({
       return wrapWithStoplight(
         <Panel variant="grow" className={className} testId="main-content-panel">
           <ProjectConversationEmptyState
+            key={activeProject?.projectId ?? 'org-scope'}
             accountId={productSpaceScope.accountId}
             workspaceId={activeWorkspaceId}
             productSpaceId={activeProjectSpace.id}

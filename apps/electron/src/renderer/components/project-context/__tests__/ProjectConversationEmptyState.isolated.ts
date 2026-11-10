@@ -359,11 +359,13 @@ describe('ProjectConversationEmptyState 发送准入 (U11)', () => {
     expect(screen.getByTestId('empty-state-send').getAttribute('data-value')).toBe('拦截前的原始草稿')
 
     // The marker carries scope identity + generation, never message content.
+    // POO-205 C3: the empty-state draft scope is per-PROJECT (the entered
+    // active project rides the key).
     const marker = jotaiStore.get(projectEntrySendNoticesAtom)[0]!
     expect(marker).toEqual({
       accountId: SCOPE.accountId,
       productSpaceId: SCOPE.productSpaceId,
-      draftKey: emptyDraftKey(SCOPE.accountId, SCOPE.productSpaceId),
+      draftKey: emptyDraftKey(SCOPE.accountId, SCOPE.productSpaceId, ACTIVE_PROJECT.projectId),
       generation: 5,
     })
   })

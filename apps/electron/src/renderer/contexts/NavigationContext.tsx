@@ -34,6 +34,7 @@ import {
   useRef,
   useState,
   useMemo,
+  useSyncExternalStore,
   type ReactNode,
 } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -75,6 +76,8 @@ import {
 import { sessionMetaMapAtom, updateSessionMetaAtom, type SessionMeta } from '@/atoms/sessions'
 import { sourcesAtom } from '@/atoms/sources'
 import { skillsAtom } from '@/atoms/skills'
+import { subscribeActiveProject, getActiveProjectRaw } from '@/components/projects/projects-bus'
+import { resolveProjectLanding, selectProjectSessionByProjectId, shouldLandProject, type ProjectFocusedSession } from '@/components/projects/enter-project'
 import {
   panelStackAtom,
   pushPanelAtom,
@@ -211,6 +214,15 @@ export function NavigationProvider({
 
   // Read skills from atom (populated by AppShell)
   const skills = useAtomValue(skillsAtom)
+
+  // POO-205 §10: all project tabs share this single NavigationProvider, and
+  // the ACTIVE TAB drives the renderer-wide active project
+  // (ProjectTabActiveProjectBridge → projects-bus). While a project is
+  // active, every sessions-navigation invariant here is PROJECT-scoped: the
+  // selected session must belong to that project, and last-selection
+  // persistence must not leak across projects.
+  const activeProject = useSyncExternalStore(subscribeActiveProject, getActiveProjectRaw)
+  const activeProjectId = activeProject?.projectId ?? null
 
   // =========================================================================
   // DERIVED NAVIGATION STATE (from focused panel + right sidebar)
@@ -549,12 +561,20 @@ export function NavigationProvider({
         // pollution during workspace switch, when workspaceId changed but navigationState
         // still reflects the old workspace's focused panel)
         const meta = store.get(sessionMetaMapAtom).get(navigationState.details.sessionId)
-        if (meta && meta.workspaceId === workspaceId) {
-          storage.set(storage.KEYS.lastSelectedSessionId, navigationState.details.sessionId, workspaceId)
+        // POO-205 §10: while a project tab is active the write is project-scoped AND
+        // restricted to that project's sessions — a foreign session must never become
+        // the project's resumed selection (project B never resumes project A's chat).
+        const matchesProject = !activeProjectId || meta?.projectId === activeProjectId
+        if (meta && meta.workspaceId === workspaceId && matchesProject) {
+          storage.set(
+            storage.KEYS.lastSelectedSessionId,
+            navigationState.details.sessionId,
+            activeProjectId ? `${workspaceId}:project:${activeProjectId}` : workspaceId,
+          )
         }
       }
     }
-  }, [navigationState, setSession, workspaceId, store])
+  }, [navigationState, setSession, workspaceId, activeProjectId, store])
 
   // =========================================================================
   // HELPERS
@@ -562,11 +582,16 @@ export function NavigationProvider({
 
   // Helper: Filter sessions by SessionFilter
   // Always excludes hidden sessions - they should never appear in navigation
+  // POO-205 §10: while a project tab is active the SAME visibility gate the
+  // sidebar uses applies here — sessions outside the active project do not
+  // exist for sessions navigation (auto-select, last-selected validation).
   const filterSessionsByFilter = useCallback(
     (filter: SessionFilter): SessionMeta[] => {
       // First filter out hidden sessions - they should never appear in any view
       const visibleSessions = sessionMetas.filter(
-        s => !s.hidden && (!workspaceId || s.workspaceId === workspaceId)
+        s => !s.hidden
+          && (!workspaceId || s.workspaceId === workspaceId)
+          && (!activeProjectId || s.projectId === activeProjectId)
       )
 
       return visibleSessions.filter((session) => {
@@ -593,7 +618,7 @@ export function NavigationProvider({
         }
       })
     },
-    [sessionMetas, workspaceId]
+    [sessionMetas, workspaceId, activeProjectId]
   )
 
   const getFirstSessionId = useCallback(
@@ -607,16 +632,19 @@ export function NavigationProvider({
   const getLastSelectedSessionId = useCallback(
     (filter: SessionFilter): string | null => {
       if (!workspaceId) return null
+      // POO-205 §10: the project tab carries ITS OWN last selection — one
+      // project never resumes the other's chat. Personal-space behavior is
+      // unchanged (plain workspaceId scope).
       const storedId = storage.get<string | null>(
         storage.KEYS.lastSelectedSessionId,
         null,
-        workspaceId
+        activeProjectId ? `${workspaceId}:project:${activeProjectId}` : workspaceId
       )
       if (!storedId) return null
       const filtered = filterSessionsByFilter(filter)
       return filtered.some(session => session.id === storedId) ? storedId : null
     },
-    [workspaceId, filterSessionsByFilter]
+    [workspaceId, activeProjectId, filterSessionsByFilter]
   )
 
   const getFirstSourceSlug = useCallback(
@@ -642,6 +670,27 @@ export function NavigationProvider({
   // =========================================================================
 
   /**
+   * POO-205 §10: the sessions auto-select fallback, shared by
+   * resolveAutoSelection and the auto-select-on-load effect. While a project
+   * tab is active the order is: the project's stored last selection → the
+   * project's most recent REAL conversation (an empty session is not
+   * history) → null, which lands the project empty state. filtered[0] is
+   * never the project fallback — it could be a never-messaged draft session.
+   */
+  const resolveSessionsFallback = useCallback(
+    (filter: SessionFilter): string | null => {
+      const lastSelectedSessionId = getLastSelectedSessionId(filter)
+      if (lastSelectedSessionId) return lastSelectedSessionId
+      if (activeProjectId) {
+        const recent = selectProjectSessionByProjectId(sessionMetas, activeProjectId)
+        return recent.kind === 'recent' ? recent.sessionId : null
+      }
+      return getFirstSessionId(filter)
+    },
+    [getLastSelectedSessionId, activeProjectId, sessionMetas, getFirstSessionId]
+  )
+
+  /**
    * Resolve auto-selection for a NavigationState.
    * When navigating to a filter without explicit details, auto-select the
    * first available item. Returns the final state (no side effects).
@@ -650,22 +699,24 @@ export function NavigationProvider({
     (newState: NavigationState, options?: { skipAutoSelect?: boolean }): NavigationState => {
       let nextState = newState
 
-      // Validate session exists in current workspace (local or remote ID)
+      // Validate session exists in current workspace (local or remote ID).
+      // POO-205 §10: while a project tab is active the session must ALSO
+      // belong to that project — anything else is a cross-project leak.
       if (isSessionsNavigation(nextState) && nextState.details) {
         const freshMetaMap = store.get(sessionMetaMapAtom)
         const meta = freshMetaMap.get(nextState.details.sessionId)
         const matchesWorkspace = !workspaceId
           || meta?.workspaceId === workspaceId
           || (remoteWorkspaceId && meta?.workspaceId === remoteWorkspaceId)
-        if (!meta || !matchesWorkspace) {
+        const matchesProject = !activeProjectId || meta?.projectId === activeProjectId
+        if (!meta || !matchesWorkspace || !matchesProject) {
           nextState = { ...nextState, details: null }
         }
       }
 
       // Sessions: auto-select last/first session
       if (isSessionsNavigation(nextState) && !nextState.details && !options?.skipAutoSelect) {
-        const lastSelectedSessionId = getLastSelectedSessionId(nextState.filter)
-        const fallbackSessionId = lastSelectedSessionId ?? getFirstSessionId(nextState.filter)
+        const fallbackSessionId = resolveSessionsFallback(nextState.filter)
         if (fallbackSessionId) {
           return { ...nextState, details: { type: 'session', sessionId: fallbackSessionId } }
         }
@@ -692,7 +743,7 @@ export function NavigationProvider({
 
       return nextState
     },
-    [store, workspaceId, remoteWorkspaceId, getLastSelectedSessionId, getFirstSessionId, getFirstSourceSlug, getFirstSkillSlug]
+    [store, workspaceId, activeProjectId, remoteWorkspaceId, resolveSessionsFallback, getFirstSourceSlug, getFirstSkillSlug]
   )
 
   // Ref keeps resolveAutoSelection fresh for reconcileFromUrlParams (defined earlier in the file)
@@ -1034,9 +1085,15 @@ export function NavigationProvider({
         const resolvedState = resolveAutoSelection(newNavState, options)
         const finalRoute = buildRouteFromNavigationState(resolvedState) as ViewRoute
 
-        // Persist last selected session for auto-select on next visit
+        // Persist last selected session for auto-select on next visit.
+        // POO-205 §10: project-scoped while a project tab is active (the
+        // details were already validated against the active project above).
         if (isSessionsNavigation(resolvedState) && resolvedState.details && workspaceId) {
-          storage.set(storage.KEYS.lastSelectedSessionId, resolvedState.details.sessionId, workspaceId)
+          storage.set(
+            storage.KEYS.lastSelectedSessionId,
+            resolvedState.details.sessionId,
+            activeProjectId ? `${workspaceId}:project:${activeProjectId}` : workspaceId
+          )
         }
 
         // Update the focused panel's route (atom update is synchronous)
@@ -1370,8 +1427,7 @@ export function NavigationProvider({
     if (store.get(panelStackAtom).length === 0) return
     if (!isSessionsNavigation(navigationState) || navigationState.details) return
 
-    const lastSelectedSessionId = getLastSelectedSessionId(navigationState.filter)
-    const fallbackSessionId = lastSelectedSessionId ?? getFirstSessionId(navigationState.filter)
+    const fallbackSessionId = resolveSessionsFallback(navigationState.filter)
     if (!fallbackSessionId) return
 
     navigateToSession(fallbackSessionId)
@@ -1379,9 +1435,87 @@ export function NavigationProvider({
     isReady,
     workspaceId,
     navigationState,
-    getLastSelectedSessionId,
-    getFirstSessionId,
+    resolveSessionsFallback,
     navigateToSession,
+  ])
+
+  // =========================================================================
+  // PROJECT LANDING INVARIANT (POO-205 §10 — NavigationProvider is the ONLY
+  // enforcement point)
+  // =========================================================================
+
+  // While a project tab is active, the focused session must belong to THAT
+  // project. `landedProjectIdRef` separates the two regimes:
+  // - PROJECT TRANSITION (entering, tab A ⇄ B, restart restore): the landing
+  //   runs NO MATTER which navigator the panel is showing — sources/skills/
+  //   settings must not survive a project switch (C3-fix).
+  // - WITHIN one project: the invariant stays surgical — it only corrects a
+  //   foreign session inside the sessions navigator, so pages the user opened
+  //   inside the project are never yanked back.
+  // The correction lands stored project selection → most recent real
+  // conversation → the project empty state (skipAutoSelect — never a
+  // fabricated selection, never a created session). A session the user just
+  // clicked still wins: its known meta belongs to the project.
+  const landedProjectIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!activeProjectId) {
+      // Home / non-project tab: forget the landed project so re-entering the
+      // SAME project re-runs its landing.
+      landedProjectIdRef.current = null
+      return
+    }
+    // Not ready → don't record the project; the next pass re-decides.
+    if (!isReady || !isSessionsReady || !workspaceId) return
+
+    const isSessions = isSessionsNavigation(navigationState)
+    const detailsSessionId = isSessionsNavigation(navigationState)
+      ? (navigationState.details?.sessionId ?? null)
+      : null
+    // The landing always targets the allSessions view, so a panel sitting on
+    // another navigator reads the stored selection under THAT filter.
+    const landingFilter: SessionFilter = isSessionsNavigation(navigationState)
+      ? navigationState.filter
+      : { kind: 'allSessions' }
+    const detailsMeta = detailsSessionId ? sessionMetaMap.get(detailsSessionId) : undefined
+    const details: ProjectFocusedSession = !detailsSessionId
+      ? 'none'
+      : detailsMeta === undefined
+        // A session whose metadata has not arrived yet is never yanked within
+        // a project — a freshly created session navigates BEFORE its meta
+        // lands in the map. A just-switched project gets no such pass: an
+        // unknown meta cannot vouch for the new project.
+        ? 'unknown'
+        : detailsMeta.projectId === activeProjectId
+          ? 'mine'
+          : 'foreign'
+
+    const storedId = getLastSelectedSessionId(landingFilter)
+    const landing = resolveProjectLanding(sessionMetas, activeProjectId, storedId)
+    const transition = landedProjectIdRef.current !== activeProjectId
+    if (!shouldLandProject({ transition, isSessions, details, hasLandingSession: landing.kind === 'session' })) {
+      landedProjectIdRef.current = activeProjectId
+      return
+    }
+
+    landedProjectIdRef.current = activeProjectId
+    if (landing.kind === 'empty') {
+      // The empty project's landing IS details=null; skipAutoSelect keeps the
+      // navigate from fabricating a selection (and this from re-running
+      // forever — details stays null, the next pass is same-project 'none').
+      navigate(routes.view.allSessions(), { skipAutoSelect: true })
+      return
+    }
+    navigate(routes.view.allSessions(landing.sessionId))
+  }, [
+    activeProjectId,
+    isReady,
+    isSessionsReady,
+    workspaceId,
+    navigationState,
+    sessionMetaMap,
+    sessionMetas,
+    getLastSelectedSessionId,
+    navigate,
   ])
 
   // =========================================================================
