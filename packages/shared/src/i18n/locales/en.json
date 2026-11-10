@@ -964,6 +964,7 @@
   "errors.pleaseReload": "Please reload the page. The error has been reported.",
   "errors.projectBindingRejectedInPersonalSpace": "Project sessions aren't supported in the personal space",
   "errors.projectContextRequired": "Sessions in an enterprise space must be created inside a project — enter a project first",
+  "errors.projectContextUnavailable": "Couldn't confirm the project information right now — check your network and try again",
   "errors.retryLoadingSessions": "Retry loading sessions",
   "errors.sessionNotFound": "Session not found",
   "fileViewer.clickToView": "Click a file path in the chat to view it here",

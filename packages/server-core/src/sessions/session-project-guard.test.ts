@@ -20,6 +20,11 @@ import {
   setSyncTrustedProductSpaceAccountId,
   setTrustedProductSpaceAccountProvider,
 } from '../handlers/rpc/trusted-product-space-account'
+import {
+  resetProjectContextResolverForTests,
+  setProjectContextResolverAdminForTests,
+  setProjectContextResolverSpaceReaderForTests,
+} from '../project-members/project-context-resolver'
 
 // POO-205 C6: sessions, branches, agent tools and imports never cross the
 // project boundary. The AGENT TOOL surface answers "does not exist" for any
@@ -152,9 +157,61 @@ describe('session project-boundary guards (POO-205 C6)', () => {
   beforeEach(() => {
     tmpRoot = mkdtempSync(join(tmpdir(), 'sm-c6-'))
     resetProductSpaceExecutionRegistryForTests()
+    resetProjectContextResolverForTests()
     setTrustedProductSpaceAccountProvider(async () => accountA)
     setSyncTrustedProductSpaceAccountId(accountA)
     setRuntimeActiveProductSpaceAccount(accountA)
+    // POO-205 C7a: the createSession/branch/spawn/import success paths now
+    // re-prove membership against polo-admin through the project-context
+    // resolver. Seed its seams so those paths see a member roster instead of
+    // an unreachable admin (which would fail creation closed).
+    setProjectContextResolverSpaceReaderForTests(
+      (id, spaceId) => id === accountA && spaceId === enterpriseSpaceId
+        ? { kind: 'enterprise', enterpriseId: 'ent-c6' }
+        : null,
+    )
+    setProjectContextResolverAdminForTests({
+      listProjects: async (organizationEnterpriseId: string) => ({
+        contractVersion: 'poo205-contract-r1' as never,
+        organizationEnterpriseId,
+        projects: [
+          {
+            id: 'proj-a',
+            organizationEnterpriseId: 'ent-c6',
+            organizationProductSpaceId: enterpriseSpaceId,
+            name: 'Project A',
+            purpose: 'ops',
+            createdByAccountId: 'owner-1',
+            createdAt: '2026-01-01T00:00:00Z',
+            updatedAt: '2026-01-01T00:00:00Z',
+            myRole: 'member',
+            memberCount: 2,
+          },
+          {
+            id: 'proj-b',
+            organizationEnterpriseId: 'ent-c6',
+            organizationProductSpaceId: enterpriseSpaceId,
+            name: 'Project B',
+            createdByAccountId: 'owner-1',
+            createdAt: '2026-01-01T00:00:00Z',
+            updatedAt: '2026-01-01T00:00:00Z',
+            myRole: 'member',
+            memberCount: 2,
+          },
+          {
+            id: 'proj-imp',
+            organizationEnterpriseId: 'ent-c6',
+            organizationProductSpaceId: enterpriseSpaceId,
+            name: 'Project Imp',
+            createdByAccountId: 'owner-1',
+            createdAt: '2026-01-01T00:00:00Z',
+            updatedAt: '2026-01-01T00:00:00Z',
+            myRole: 'member',
+            memberCount: 2,
+          },
+        ],
+      }),
+    } as never)
     workspace = { id: workspaceId, name: 'C6 Workspace', rootPath: tmpRoot, createdAt: Date.now() }
     sm = new SessionManager({ workspace: workspace as never })
     ;(sm as unknown as { initGate: { markReady(): void } }).initGate.markReady()
@@ -162,6 +219,7 @@ describe('session project-boundary guards (POO-205 C6)', () => {
 
   afterEach(() => {
     rmSync(tmpRoot, { recursive: true, force: true })
+    resetProjectContextResolverForTests()
     setRuntimeActiveProductSpace(null)
     setSyncTrustedProductSpaceAccountId(null)
   })

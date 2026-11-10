@@ -970,6 +970,7 @@
   "errors.pleaseReload": "Odśwież stronę. Błąd został zgłoszony.",
   "errors.projectBindingRejectedInPersonalSpace": "Sesje projektowe nie są obsługiwane w przestrzeni osobistej",
   "errors.projectContextRequired": "Sesje w przestrzeni firmowej muszą być tworzone wewnątrz projektu — najpierw wejdź do projektu",
+  "errors.projectContextUnavailable": "Nie można teraz potwierdzić informacji o projekcie — sprawdź sieć i spróbuj ponownie",
   "errors.retryLoadingSessions": "Spróbuj ponownie załadować sesje",
   "errors.sessionNotFound": "Sesja nie została znaleziona",
   "fileViewer.clickToView": "Kliknij ścieżkę pliku w czacie, aby go tutaj wyświetlić",

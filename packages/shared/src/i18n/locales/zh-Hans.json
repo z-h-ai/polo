@@ -964,6 +964,7 @@
   "errors.pleaseReload": "请重新加载页面。错误已被报告。",
   "errors.projectBindingRejectedInPersonalSpace": "个人空间不支持项目会话",
   "errors.projectContextRequired": "企业空间里的会话需要在项目中创建，请先进入一个项目",
+  "errors.projectContextUnavailable": "暂时无法确认项目信息，请检查网络后重试",
   "errors.retryLoadingSessions": "重试加载会话",
   "errors.sessionNotFound": "未找到会话",
   "fileViewer.clickToView": "点击聊天中的文件路径在此查看",

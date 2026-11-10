@@ -964,6 +964,7 @@
   "errors.pleaseReload": "Kérjük, töltsd újra az oldalt. A hiba jelentve lett.",
   "errors.projectBindingRejectedInPersonalSpace": "Projekt-munkamenetek nem támogatottak a személyes térben",
   "errors.projectContextRequired": "A vállalati térben lévő munkameneteket projekten belül kell létrehozni — előbb lépj be egy projektbe",
+  "errors.projectContextUnavailable": "A projekt információi most nem ellenőrizhetők — ellenőrizze a hálózatot, és próbálja újra",
   "errors.retryLoadingSessions": "Munkamenetek újratöltése",
   "errors.sessionNotFound": "A munkamenet nem található",
   "fileViewer.clickToView": "Kattints egy fájl útvonalra a chatben az itt való megtekintéshez",

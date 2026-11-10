@@ -2326,6 +2326,21 @@ export class PiAgent extends BaseAgent {
   // Chat (AsyncGenerator backed by the subprocess event queue)
   // ============================================================
 
+  /**
+   * POO-196 R3 P12-5 + POO-205 C7a (R12): the project-context block rides
+   * EVERY turn's system prompt (first and resumed alike) — on the system
+   * side, never as a fabricated user message. The live override pushed by
+   * the session layer (`updateProjectContext`) shadows the session-config
+   * snapshot, so admin-side instruction edits take effect on the CURRENT
+   * turn. Kept as a method so the per-turn read is directly testable.
+   */
+  protected buildTurnSystemPrompt(baseSystemPrompt: string): string {
+    const projectContext = this.effectiveProjectContext();
+    return projectContext
+      ? `${baseSystemPrompt}\n\n${formatProjectContextSystemAppend(projectContext)}`
+      : baseSystemPrompt;
+  }
+
   protected async *chatImpl(
     messageParam: string,
     attachments?: FileAttachment[],
@@ -2446,10 +2461,11 @@ export class PiAgent extends BaseAgent {
       );
       // POO-196 R3 P12-5: project context metadata rides EVERY turn of a
       // project-bound session (first and resumed alike) — on the system side,
-      // never as a fabricated user message.
-      const systemPrompt = this.config.session?.projectContext
-        ? `${baseSystemPrompt}\n\n${formatProjectContextSystemAppend(this.config.session.projectContext)}`
-        : baseSystemPrompt;
+      // never as a fabricated user message. POO-205 C7a (R12): the session
+      // layer re-proves membership per send and may push a fresher
+      // admin-proven snapshot; the override shadows the config snapshot so
+      // instruction edits take effect on THIS turn.
+      const systemPrompt = this.buildTurnSystemPrompt(baseSystemPrompt);
 
       // Build context from sources
       const sourceContext = this.sourceManager.formatSourceState();

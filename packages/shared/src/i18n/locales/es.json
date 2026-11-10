@@ -964,6 +964,7 @@
   "errors.pleaseReload": "Por favor recarga la página. El error ha sido reportado.",
   "errors.projectBindingRejectedInPersonalSpace": "Las sesiones de proyecto no están disponibles en el espacio personal",
   "errors.projectContextRequired": "Las sesiones en un espacio empresarial deben crearse dentro de un proyecto: entra primero en un proyecto",
+  "errors.projectContextUnavailable": "No se pudo confirmar la información del proyecto; revisa tu red y vuelve a intentarlo",
   "errors.retryLoadingSessions": "Reintentar cargar sesiones",
   "errors.sessionNotFound": "Sesión no encontrada",
   "fileViewer.clickToView": "Haz clic en una ruta de archivo en el chat para verlo aquí",

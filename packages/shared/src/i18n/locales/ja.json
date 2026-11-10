@@ -964,6 +964,7 @@
   "errors.pleaseReload": "ページを再読み込みしてください。エラーは報告されました。",
   "errors.projectBindingRejectedInPersonalSpace": "パーソナルスペースではプロジェクトセッションは利用できません",
   "errors.projectContextRequired": "エンタープライズスペースのセッションはプロジェクト内で作成する必要があります。先にプロジェクトに入ってください",
+  "errors.projectContextUnavailable": "プロジェクト情報を今確認できません。ネットワークを確認して再試行してください",
   "errors.retryLoadingSessions": "セッション一覧を再読み込み",
   "errors.sessionNotFound": "セッションが見つかりません",
   "fileViewer.clickToView": "チャット内のファイルパスをクリックすると、ここに表示されます",

@@ -39,6 +39,7 @@ import {
   projectErrorCodeOf,
   type ProjectMembersAdmin,
 } from './admin-client'
+import { invalidateProjectContextCache } from './project-context-resolver'
 
 /**
  * POO-205 project-members service (supersedes the POO-196 追加轮 surface).
@@ -297,6 +298,11 @@ export async function pmUpdateProject(input: PmUpdateProjectInput): Promise<Proj
   try {
     const result = await theAdmin().updateProject(scope.organizationEnterpriseId, input.projectId, input.command)
     assertOrganizationScopeCurrent(scope)
+    // POO-205 C7a: a successful name/purpose/instructions PATCH must be
+    // visible to the next SEND's membership re-proof — drop this
+    // organization's resolver cache so sessions don't inject a ≤30s-stale
+    // snapshot.
+    invalidateProjectContextCache(scope.organizationEnterpriseId)
     return result
   } catch (error) {
     throw mapAdminFailure(error)
@@ -325,6 +331,9 @@ export async function pmAddProjectMembers(input: PmAddProjectMembersInput): Prom
   try {
     const result = await theAdmin().addProjectMembers(scope.organizationEnterpriseId, input.projectId, input.command)
     assertOrganizationScopeCurrent(scope)
+    // POO-205 C7a: membership changed — the next SEND must re-proof against
+    // fresh data, not a cached roster.
+    invalidateProjectContextCache(scope.organizationEnterpriseId)
     return result
   } catch (error) {
     throw mapAdminFailure(error)
@@ -342,6 +351,7 @@ export async function pmUpdateProjectMember(input: PmUpdateProjectMemberInput): 
       { role: input.role },
     )
     assertOrganizationScopeCurrent(scope)
+    invalidateProjectContextCache(scope.organizationEnterpriseId)
     return result
   } catch (error) {
     throw mapAdminFailure(error)
@@ -354,6 +364,9 @@ export async function pmRemoveProjectMember(input: PmRemoveProjectMemberInput): 
   try {
     const result = await theAdmin().removeProjectMember(scope.organizationEnterpriseId, input.projectId, input.targetAccountId)
     assertOrganizationScopeCurrent(scope)
+    // POO-205 C7a: the removed member's next SEND must observe not_member
+    // immediately — their desktop caches the roster for ≤30s otherwise.
+    invalidateProjectContextCache(scope.organizationEnterpriseId)
     return result
   } catch (error) {
     throw mapAdminFailure(error)

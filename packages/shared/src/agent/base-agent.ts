@@ -1266,6 +1266,34 @@ ${formattedMessages}
     return false;
   }
 
+  // ============================================================
+  // POO-205 C7a (R12): live project-context override
+  // ============================================================
+
+  /**
+   * The admin-proven project snapshot pushed by the session layer on every
+   * send (project-context-resolver). When set, it SHADOWS the session
+   * config's `projectContext` for system-prompt assembly; `undefined` falls
+   * back to the config snapshot. Subclasses read it through
+   * {@link effectiveProjectContext} so both the initial value and the
+   * mid-session updates come from one place.
+   */
+  protected projectContextOverride?: { name: string; purpose?: string; instructions?: string };
+
+  /**
+   * The project context the backend should inject this turn: the live
+   * override, else the session config's persisted snapshot.
+   */
+  protected effectiveProjectContext(): { name: string; purpose?: string; instructions?: string } | undefined {
+    return this.projectContextOverride ?? this.config.session?.projectContext;
+  }
+
+  /** AgentBackend contract — stores the override for the NEXT system-prompt
+   * assembly (both backends rebuild per turn). */
+  updateProjectContext(context: { name: string; purpose?: string; instructions?: string } | undefined): void {
+    this.projectContextOverride = context;
+  }
+
   /**
    * Check if currently processing a query.
    */

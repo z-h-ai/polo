@@ -486,6 +486,17 @@ export interface AgentBackend {
   redirect(message: string): boolean;
 
   /**
+   * POO-205 C7a (R12): replace the session's project-context system-prompt
+   * block mid-session. The session layer re-proves membership on every send
+   * (project-context-resolver) and pushes the admin-proven snapshot here so
+   * instruction edits take effect on the CURRENT turn — before the user
+   * message is appended. `undefined` clears the override, falling back to the
+   * session-config snapshot. Backends without per-turn system-prompt
+   * assembly may ignore it (the next turn rebuilds from config anyway).
+   */
+  updateProjectContext(context: { name: string; purpose?: string; instructions?: string } | undefined): void;
+
+  /**
    * Run a simple text completion using the backend's auth infrastructure.
    * Used for connection testing, title generation, and summarization.
    */

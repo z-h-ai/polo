@@ -2088,6 +2088,13 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                             // replacement guidance copy is localized.
                             const message = code === 'BRANCH_PROJECT_MISMATCH'
                               ? t('errors.branchProjectMismatch')
+                              : code === 'prj_not_found'
+                              // POO-205 C7a: branch source membership is
+                              // re-proved server-side — reuse the projects
+                              // panel's recovery copy (C1), no new key.
+                              ? t('projectMembers.error.notFound')
+                              : code === 'PROJECT_CONTEXT_UNAVAILABLE'
+                              ? t('errors.projectContextUnavailable')
                               : rawMessage.includes('source and target providers must match')
                               || rawMessage.includes('same provider/backend')
                               ? t('chat.branchProviderMismatch')

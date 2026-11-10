@@ -7,7 +7,7 @@ type ContentBlockParam =
   | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }
   | { type: 'document'; source: { type: 'base64'; media_type: string; data: string } };
 import { z } from 'zod';
-import { getSystemPrompt } from '../prompts/system.ts';
+import { formatProjectContextSystemAppend, getSystemPrompt } from '../prompts/system.ts';
 import { BaseAgent, type MiniAgentConfig, MINI_AGENT_TOOLS, MINI_AGENT_MCP_KEYS } from './base-agent.ts';
 import type { BackendConfig, PostInitResult, PermissionRequestType, SdkMcpServerConfig } from './backend/types.ts';
 // Plan types are used by UI components; not needed in polo-ai.ts since Safe Mode is user-controlled
@@ -1455,15 +1455,7 @@ export class ClaudeAgent extends BaseAgent {
               type: 'preset' as const,
               preset: 'claude_code' as const,
               // Working directory included for monorepo context file discovery
-              append: getSystemPrompt(
-                this.pinnedPreferencesPrompt ?? undefined,
-                this.config.debugMode,
-                this.workspaceRootPath,
-                this.config.session?.workingDirectory,
-                undefined, // preset
-                undefined, // backendName
-                this.pinnedIncludeCoAuthoredBy ?? undefined
-              ),
+              append: this.buildPresetAppendSystemPrompt(),
             },
         // Use sdkCwd for SDK session storage - this is set once at session creation and never changes.
         // This ensures SDK can always find session transcripts regardless of workingDirectory changes.
@@ -3092,6 +3084,31 @@ This is a branched conversation. All prior messages in this conversation are par
   }
 
   // getMiniSystemPrompt() and filterMcpServersForMiniAgent() are inherited from BaseAgent
+
+  /**
+   * POO-196 R3 P12-5 + POO-205 C7a (R9): the project's authoritative identity
+   * rides EVERY non-mini turn, appended to the claude_code preset in the same
+   * format as the Pi backend. R12: the live override (pushed per send by the
+   * session layer after re-proving membership) shadows the session-config
+   * snapshot, so admin-side instruction edits take effect on THIS turn —
+   * `options` is rebuilt per chat call and reads it here. Kept as a method so
+   * the per-turn assembly is directly testable.
+   */
+  protected buildPresetAppendSystemPrompt(): string {
+    const base = getSystemPrompt(
+      this.pinnedPreferencesPrompt ?? undefined,
+      this.config.debugMode,
+      this.workspaceRootPath,
+      this.config.session?.workingDirectory,
+      undefined, // preset
+      undefined, // backendName
+      this.pinnedIncludeCoAuthoredBy ?? undefined
+    );
+    const projectContext = this.effectiveProjectContext();
+    return projectContext
+      ? `${base}\n\n${formatProjectContextSystemAppend(projectContext)}`
+      : base;
+  }
 
   getWorkspace(): Workspace {
     return this.config.workspace;

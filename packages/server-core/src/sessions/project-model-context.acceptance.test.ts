@@ -37,6 +37,7 @@ const { SessionManager, setSessionPlatform } = await import('./SessionManager.ts
 const { setInvocationLlmConnections } = await import('@polo-ai/shared/config')
 const { setRuntimeActiveProductSpace, setRuntimeActiveProductSpaceAccount } = await import('../runtime/product-space-executions')
 const { setSyncTrustedProductSpaceAccountId, setTrustedProductSpaceAccountProvider } = await import('../handlers/rpc/trusted-product-space-account')
+const { resetProjectContextResolverForTests, setProjectContextResolverAdminForTests, setProjectContextResolverSpaceReaderForTests } = await import('../project-members/project-context-resolver')
 const { piAgentServerBuildArgs } = await import('../../../../scripts/build/pi-build-args.ts') as {
   piAgentServerBuildArgs: (src: string, outdir: string) => string[]
 }
@@ -49,6 +50,11 @@ describe('P12-5 project context reaches the real model request (production Pi ch
   let piStagingLayout: string | null = null
   let sm: InstanceType<typeof import('./SessionManager').SessionManager>
   const seededSessionIds = new Set<string>()
+  // POO-205 C7a: createSession/sendMessage re-prove project membership
+  // against polo-admin. This acceptance proves the PROMPT-side contract, so
+  // the admin seam is stubbed with a mutable roster each test fills in —
+  // the unique names are only known at test time.
+  const adminRoster: Array<{ id: string; name: string; purpose?: string }> = []
 
   function ensurePiServerStaging(): string {
     if (piStagingLayout) return piStagingLayout
@@ -183,6 +189,33 @@ describe('P12-5 project context reaches the real model request (production Pi ch
     // every project-bound session must carry its projectId.
     setRuntimeActiveProductSpace(TEST_SPACE_ID, 'enterprise')
     setTrustedProductSpaceAccountProvider(async () => TEST_ACCOUNT_ID)
+    // POO-205 C7a: the membership re-proof seam — an always-member roster
+    // the tests extend with their runtime-unique project names.
+    adminRoster.length = 0
+    resetProjectContextResolverForTests()
+    setProjectContextResolverSpaceReaderForTests(
+      (id, spaceId) => id === TEST_ACCOUNT_ID && spaceId === TEST_SPACE_ID
+        ? { kind: 'enterprise', enterpriseId: 'ent-p125' }
+        : null,
+    )
+    setProjectContextResolverAdminForTests({
+      listProjects: async (organizationEnterpriseId: string) => ({
+        contractVersion: 'poo205-contract-r1' as never,
+        organizationEnterpriseId,
+        projects: adminRoster.map(entry => ({
+          id: entry.id,
+          organizationEnterpriseId,
+          organizationProductSpaceId: TEST_SPACE_ID,
+          name: entry.name,
+          ...(entry.purpose === undefined ? {} : { purpose: entry.purpose }),
+          createdByAccountId: TEST_ACCOUNT_ID,
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+          myRole: 'member',
+          memberCount: 2,
+        })),
+      }),
+    } as never)
     sm.setEventSink((() => {}) as never)
   })
 
@@ -201,6 +234,7 @@ describe('P12-5 project context reaches the real model request (production Pi ch
     setRuntimeActiveProductSpace(null)
     setRuntimeActiveProductSpaceAccount(null)
     setSyncTrustedProductSpaceAccountId(null)
+    resetProjectContextResolverForTests()
     if (piStagingLayout) {
       rmSync(piStagingLayout, { recursive: true, force: true })
     }
@@ -213,6 +247,7 @@ describe('P12-5 project context reaches the real model request (production Pi ch
     usePiConnection('p125-fake', fake.url)
 
     const uniqueName = `P12-5上下文验证-甲-${Math.random().toString(36).slice(2, 8)}`
+    adminRoster.push({ id: 'project-alpha', name: uniqueName })
     const created = await sm.createSession('ws_test', {
       name: 'p125-a',
       llmConnection: 'p125-fake',
@@ -257,6 +292,8 @@ describe('P12-5 project context reaches the real model request (production Pi ch
 
     const nameA = `P12-5上下文-甲-${Math.random().toString(36).slice(2, 8)}`
     const nameB = `P12-5上下文-乙-${Math.random().toString(36).slice(2, 8)}`
+    adminRoster.push({ id: 'project-iso-a', name: nameA })
+    adminRoster.push({ id: 'project-iso-b', name: nameB, purpose: '乙项目介绍' })
 
     const a = await sm.createSession('ws_test', {
       name: 'p125-iso-a',

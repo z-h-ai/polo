@@ -11,6 +11,11 @@ import { APP_VERSION } from '../version/index.ts';
 import { readPluginName } from '../utils/workspace.ts';
 import { globSync } from 'glob';
 import os from 'os';
+import {
+  PROJECT_INSTRUCTIONS_MAX_CHARS,
+  PROJECT_NAME_MAX_CHARS,
+  PROJECT_PURPOSE_MAX_CHARS,
+} from '../admin/project-contract.ts';
 
 /** Maximum size of CLAUDE.md file to include (10KB) */
 const MAX_CONTEXT_FILE_SIZE = 10 * 1024;
@@ -353,29 +358,41 @@ Use config_validate to verify changes match the expected schema.
  * treat them as standing directives for this project, below platform rules but
  * above generic defaults. Deterministic output so acceptance evidence can
  * grep the real model request for the name.
+ *
+ * POO-205 C7a (P3-2): every field is length-clamped to its contract maximum
+ * (PROJECT_*_MAX_CHARS) — resolver results AND legacy session snapshots both
+ * pass through here — and closing-tag lookalikes inside any field are
+ * neutralized so member-authored text cannot break out of (or forge content
+ * after) the surrounding blocks.
  */
 export function formatProjectContextSystemAppend(projectContext: {
   name: string;
   purpose?: string;
   instructions?: string;
 }): string {
-  const purposeLine = projectContext.purpose?.trim()
-    ? `\nProject introduction: ${projectContext.purpose.trim()}`
-    : '';
+  const clamp = (value: string, max: number): string => value.length > max ? value.slice(0, max) : value;
+  // `</project_` is the prefix of every block closer this format emits; the
+  // escaped form is inert inside the prompt but still human-readable.
+  const neutralize = (value: string): string => value.replace(/<\/project_/gi, '<\\/project_');
+  const sanitize = (value: string, max: number): string => neutralize(clamp(value, max));
+
+  const name = sanitize(projectContext.name, PROJECT_NAME_MAX_CHARS).trim() || 'Unnamed project';
+  const purpose = projectContext.purpose?.trim();
+  const purposeLine = purpose ? `Project introduction: ${sanitize(purpose, PROJECT_PURPOSE_MAX_CHARS)}` : '';
   const instructions = projectContext.instructions?.trim();
   const instructionsBlock = instructions
     ? [
         '',
         '<project_instructions>',
         'The project owner authored the following standing instructions for this project. Follow them for every turn in this project; they override generic defaults but never platform safety rules.',
-        instructions,
+        sanitize(instructions, PROJECT_INSTRUCTIONS_MAX_CHARS),
         '</project_instructions>',
       ].join('\n')
     : '';
   return [
     '<project_context>',
     'The session belongs to the following project. Treat the project name and introduction as authoritative project context metadata.',
-    `Project name: ${projectContext.name}`,
+    `Project name: ${name}`,
     purposeLine,
     '</project_context>',
   ].filter(Boolean).join('\n') + instructionsBlock;

@@ -117,6 +117,10 @@ import {
 } from '@polo-ai/shared/sessions'
 import { relocateProjectSessionArtifacts } from './session-store-relocation'
 import { assertSessionProjectBinding, resolveSessionProjectBinding } from './session-project-binding'
+import {
+  resolveProjectContext,
+  type ResolvedProjectContext,
+} from '../project-members/project-context-resolver'
 import { loadWorkspaceSources, loadAllSources, getSourcesBySlugs, isSourceUsable, type LoadedSource, type McpServerConfig, getSourcesNeedingAuth, getSourceCredentialManager, getSourceServerBuilder, type SourceWithCredential, isApiOAuthProvider, hasRenewEndpoint, SERVER_BUILD_ERRORS, TokenRefreshManager, createTokenGetter } from '@polo-ai/shared/sources'
 import { ConfigWatcher, type ConfigWatcherCallbacks } from '@polo-ai/shared/config'
 import { getValidClaudeOAuthToken } from '@polo-ai/shared/auth'
@@ -4725,6 +4729,28 @@ export class SessionManager implements ISessionManager {
       projectId: boundProjectId,
     })
 
+    // POO-205 C7a (P3-1): the renderer-supplied snapshot is presentation
+    // state, never authority. Before the session is born, re-prove the
+    // caller's membership against polo-admin and take name/purpose/
+    // instructions from THAT read. not_member refuses with the admin
+    // contract's prj_not_found (C9 will close the tab); unavailable refuses
+    // with PROJECT_CONTEXT_UNAVAILABLE instead of trusting client state.
+    let effectiveProjectContext = boundProjectContext
+    if (effectiveProjectId && trustedScope && activeSpaceKind === 'enterprise') {
+      const resolution = await resolveProjectContext({
+        accountId: trustedScope.accountId,
+        productSpaceId: trustedScope.productSpaceId,
+        projectId: effectiveProjectId,
+      })
+      if (resolution.status === 'member') {
+        effectiveProjectContext = resolution.context
+      } else if (resolution.status === 'not_member') {
+        throw new CodedError('prj_not_found', '你已不在这个项目中，或项目已不可访问')
+      } else {
+        throw new CodedError('PROJECT_CONTEXT_UNAVAILABLE', SESSION_PROJECT_ERROR_MESSAGES.PROJECT_CONTEXT_UNAVAILABLE)
+      }
+    }
+
     // POO-205 (G4): a project session's physical store is its project root —
     // the derived path rides the record as workspaceRootPath, so every later
     // save (persistence queue) lands in the same store automatically.
@@ -4749,10 +4775,11 @@ export class SessionManager implements ISessionManager {
       accountId: trustedScope?.accountId,
       projectId: effectiveProjectId,
       // P12-5: capture the project's context metadata only for a session the
-      // server itself binds to an enterprise space — the renderer-supplied
-      // values are a projection of THAT space, never a client-asserted scope
-      // (a branch carries its SOURCE's context forward, C6).
-      projectContext: effectiveProjectId ? boundProjectContext : undefined,
+      // server itself binds to an enterprise space — C7a replaces the
+      // renderer-supplied projection with the admin-proven snapshot (a
+      // branch carries its SOURCE's id forward but STILL gets a fresh
+      // server-side snapshot, C7a).
+      projectContext: effectiveProjectId ? effectiveProjectContext : undefined,
     })
 
     // Branch: copy messages from source session up to and including the branch point
@@ -9342,6 +9369,50 @@ export class SessionManager implements ISessionManager {
         // generation, and a committed turn can only ever be torn down by that
         // cleanup — never resurrect after it.
 
+        // POO-205 C7a (P3-3): every turn start on a project-bound session
+        // re-proves the caller's membership BEFORE the user message is
+        // appended/persisted. member → a changed snapshot is written back to
+        // the managed session + persisted header and pushed to the live
+        // agent, so admin-side instruction edits take effect on THIS turn;
+        // not_member → prj_not_found, nothing appended, nothing written;
+        // unavailable → degrade to the session's persisted snapshot (SEND
+        // stays fail-open, unlike CREATE) with a warning. managed's stamped
+        // scope is the input: once it no longer matches the committed fence
+        // (space switched) the resolver says `unavailable` and the snapshot
+        // keeps the turn alive — C9 owns tab reconciliation. Internal
+        // continuations re-prove identically: they are still turns in the
+        // project.
+        if (managed.projectId && managed.productSpaceId && getRuntimeActiveProductSpaceKind() === 'enterprise') {
+          const runtimeScope = getRuntimeActiveProductSpaceScope()
+          if (runtimeScope && runtimeScope.productSpaceId === managed.productSpaceId) {
+            const resolution = await resolveProjectContext({
+              accountId: managed.accountId ?? runtimeScope.accountId,
+              productSpaceId: managed.productSpaceId,
+              projectId: managed.projectId,
+            })
+            if (resolution.status === 'member') {
+              const next = resolution.context
+              const prev = managed.projectContext
+              const changed = !prev
+                || prev.name !== next.name
+                || prev.purpose !== next.purpose
+                || prev.instructions !== next.instructions
+              if (changed) {
+                managed.projectContext = next
+                this.enqueuePersist(managed)
+                // R12: the live backend picks the new context up for THIS
+                // turn (Claude rebuilds `options` per chat call; Pi reads
+                // the override at each turn's system-prompt assembly).
+                managed.agent?.updateProjectContext(next)
+              }
+            } else if (resolution.status === 'not_member') {
+              throw new CodedError('prj_not_found', '你已不在这个项目中，或项目已不可访问')
+            } else {
+              sessionLog.warn(`[poo205-c7a] project context unavailable for session ${sessionId}; sending with the persisted snapshot`)
+            }
+          }
+        }
+
         // The turn-start reservation was already bound at entry (before any
         // await). Re-assert here defensively: between the entry bind and this
         // point nothing else may have claimed the generation, and question
@@ -13922,6 +13993,24 @@ export class SessionManager implements ISessionManager {
       activeSpaceKind: importSpaceKind,
       projectId: options?.projectId,
     })
+    // POO-205 C7a: the SAME member re-proof as createSession — an imported
+    // session must not smuggle in a snapshot (or a membership) the admin
+    // would not vouch for in the destination space.
+    let importedProjectContext: ResolvedProjectContext | undefined
+    if (importedProjectId && importSpaceKind === 'enterprise') {
+      const resolution = await resolveProjectContext({
+        accountId: importScope.accountId,
+        productSpaceId: importScope.productSpaceId,
+        projectId: importedProjectId,
+      })
+      if (resolution.status === 'member') {
+        importedProjectContext = resolution.context
+      } else if (resolution.status === 'not_member') {
+        throw new CodedError('prj_not_found', '你已不在这个项目中，或项目已不可访问')
+      } else {
+        throw new CodedError('PROJECT_CONTEXT_UNAVAILABLE', SESSION_PROJECT_ERROR_MESSAGES.PROJECT_CONTEXT_UNAVAILABLE)
+      }
+    }
     // POO-205 (G4): a project-bound import writes into the project's store
     // root — reservation, JSONL, files and rollback all target it.
     const importStoreRoot = importedProjectId && importScope.productSpaceId
@@ -14003,8 +14092,9 @@ export class SessionManager implements ISessionManager {
         accountId: importScope.accountId,
         // POO-205 C6: the destination's own project binding (the gate above
         // guarantees it in an enterprise space) — never the bundle header's
-        // foreign binding.
+        // foreign binding. C7a adds the admin-proven context snapshot.
         projectId: importedProjectId,
+        ...(importedProjectId ? { projectContext: importedProjectContext } : {}),
       }
 
       // Fork-specific: set up SDK branching if branchInfo provided
