@@ -106,7 +106,7 @@ C = 客户端（POO-205-exec），A = polo-admin（admin worker）。每批独�
 
 ### 3.1 收口记录（2026-11-10，负责人验收后提交，均未 push）
 
-客户端 `POO-205/refactor/space-interaction`：C1 `35d6b7a2`、C2 `a0c8ff7d`、C3 `ebdd1a11`、C4 `81fd7432`、C4-fix `0a203682`、C5 `f872fd25`、C6 `1ed6d1d7`、C8 `c72136ca`（合 `05a50a55`）、C10 `07d273ea`（合 `a4460eda`）、C7a `e5a7813c`、C11 `12b58d7d`（合 `b5648932`）、C7b `6d7ac696`、C9 `01569938`、C12 `b237a200`（合 `ff7df118`）。
+客户端 `POO-205/refactor/space-interaction`：C1 `35d6b7a2`、C2 `a0c8ff7d`、C3 `ebdd1a11`、C4 `81fd7432`、C4-fix `f872fd25`、C5 `6eea6b36`、C6 `1ed6d1d7`、C8 `c72136ca`（合 `05a50a55`）、C10 `07d273ea`（合 `a4460eda`）、C7a `e5a7813c`、C11 `12b58d7d`（合 `b5648932`）、C7b `6d7ac696`、C9 `01569938`、C12 `b237a200`（合 `ff7df118`）。
 admin `POO-205/integration`：A1 `d2ed1e96`、A2 `7f8e21a4`（上一轮已入库）、A3a `8ce7b784`、A3b `8c070ade`、C13 `b39ce1b7`。
 负责人修复批（2026-11-10，M1 里程碑验收期发现）：X7 `f2c528f5`、X8 `87521a37`。
 §1/§2 审计与裁决全部对账落地；M1+M2+M3 里程碑范围内的批次全部收口，M4（三身份 e2e 与 i18n 清理）待做。
@@ -132,3 +132,4 @@ admin `POO-205/integration`：A1 `d2ed1e96`、A2 `7f8e21a4`（上一轮已入库
 | X6 | 侧栏折叠态（sidebarVisible=false 持久化）下项目 Tab 身份头渲染在 0 宽 sidebarRef 容器内被盖住，成员/设置/新建会话入口全部不可见不可点 | 真实应用折叠态截图：项目头区域零像素 | M4 前修复（M1 收口时仍开） |
 | X7 | 项目会话 generate_app 画布写端用 sessionStorage 纯工作区根派生（{ws}/sessions/{id}），读端（twin 门/打包/校验）按 C5 store dir（project-sessions/prj_*/sessions/{id}）找 → 画布产物落旧根，「无法将此应用打包保存」必现 | 裸调 packageGenUiAppArtifact 前后对照；修复后 ok:true（bundle 992B, 6ms） | `f2c528f5` |
 | X8 | GenUiAppPublishBridge 每次保存带 sourceKey（A3b 幂等键），shared 协议与 server-core CreateSchema 均 .strict() 且无该字段 → 每次保存必 VALIDATION_ERROR（被 X7 掩盖，X7 修后显形）| 真实应用：点保存 → 按钮翻转「已保存到我的应用」；DB version1→重存 200+version2，恒 1 行 | `87521a37` |
+| X9 | 画布卡片保存态（「已保存到我的应用」）不跨会话恢复：publishState 是组件内存态，重进会话后按钮回退「保存到我的应用」；因 A3b sourceKey 幂等（重存=200 新版本而非新行），误触重存不产生脏数据 | 真实应用：保存成功后离开再回该会话，按钮回到「保存到我的应用」；member_apps 恒 1 行 | M4 候选（需把 publishState 挂到 myapps:list 按 sourceKey 回查） |
