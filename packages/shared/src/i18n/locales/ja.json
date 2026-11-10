@@ -3143,6 +3143,8 @@
   "topbar.account.toggleTheme": "テーマを切り替え",
   "topbar.account.workspaces": "Workspaces",
   "topbar.brand.home": "Polo ホームに戻る",
+  "topbar.chatEntry.projectRequired": "先にプロジェクトを作成するか、プロジェクトに入ってください",
+  "topbar.chatEntry.sessionProjectUnavailable": "このセッションのプロジェクトにはアクセスできなくなりました",
   "topbar.home": "ホーム",
   "topbar.nav.back": "戻る",
   "topbar.nav.forward": "進む",

@@ -15,7 +15,26 @@ export const installedAppsAtom = atom<AppDefinition[]>(normalizeInstalledApps([]
 
 export const openTabsAtom = atom<TabInstance[]>([POLO_TAB])
 
+/** POO-205 C4: the committed ProductSpace kind ('personal' | 'enterprise'),
+ * published by TabShellProvider's bridge from the ProductSpaceContext. Null
+ * outside a committed space (legacy local-account windows, pre-hydration):
+ * every kind-gated behavior fails OPEN to the personal layout. */
+export const committedSpaceKindAtom = atom<'personal' | 'enterprise' | null>(null)
+
 export const activeTabIdAtom = atom<string>(HOME_TAB_ID)
+
+/**
+ * POO-205 C4 (R4): the SINGLE source of "which tabs exist" for the strip,
+ * ⌘-digit / ⌘⇧[ ] cycling and close-tab fallbacks. In an ENTERPRISE committed
+ * space the Polo tab retires (chat lives only inside project tabs) — it stays
+ * in openTabsAtom (persistence, TabContent mounting, the personal layout all
+ * still need it) but every visible-tab consumer reads through this atom.
+ */
+export const visibleTabsAtom = atom<TabInstance[]>((get) => {
+  const tabs = get(openTabsAtom)
+  if (get(committedSpaceKindAtom) !== 'enterprise') return tabs
+  return tabs.filter((tab) => tab.type !== 'polo')
+})
 
 export const activeTabAtom = atom<TabInstance | null>((get) => {
   const activeTabId = get(activeTabIdAtom)
@@ -61,11 +80,10 @@ export const openProjectTabAtom = atom(
         title: project.name,
         project,
       }
-      const poloIndex = tabs.findIndex((tab) => tab.id === POLO_TAB_ID)
-      const insertAt = poloIndex >= 0 ? poloIndex + 1 : 0
-      const next = [...tabs]
-      next.splice(insertAt, 0, tab)
-      set(openTabsAtom, next)
+      // POO-205 C4 (R6): a new project tab APPENDS — the ⌘-digit mapping is
+      // [Home, ...visible tabs], so inserting after the (enterprise-invisible)
+      // Polo tab would silently renumber the user's tabs mid-session.
+      set(openTabsAtom, [...tabs, tab])
     }
     set(activeTabIdAtom, tabId)
   },
@@ -129,16 +147,40 @@ export const closeTabAtom = atom(
     }
 
     const tabs = get(openTabsAtom)
+    const closingTab = tabs.find((tab) => tab.id === tabId)
     const closingIndex = tabs.findIndex((tab) => tab.id === tabId)
     if (closingIndex === -1) return
+
+    // The closed tab's slot in the PRE-close visible strip decides the
+    // replacement — read BEFORE the removal below mutates the atom, or the
+    // closing tab would already be gone from the derived list.
+    const closingVisibleIndex = get(visibleTabsAtom).findIndex((tab) => tab.id === tabId)
 
     const nextTabs = tabs.filter((tab) => tab.id !== tabId)
     set(openTabsAtom, nextTabs)
 
-    if (get(activeTabIdAtom) === tabId) {
-      const replacement = nextTabs[Math.min(closingIndex, nextTabs.length - 1)]
-      set(activeTabIdAtom, replacement?.id ?? HOME_TAB_ID)
+    if (get(activeTabIdAtom) !== tabId) return
+
+    // POO-205 C4 (R5): closing the ACTIVE project tab always returns Home —
+    // never a neighbor's conversation, and never a stopped-project surprise.
+    // (The project's running sessions keep running; only the tab closes.)
+    if (closingTab?.type === 'project') {
+      set(activeTabIdAtom, HOME_TAB_ID)
+      return
     }
+
+    // The neighbor fallback reads the VISIBLE strip (C4-A): in an enterprise
+    // space the retired Polo tab is never the replacement, and closing the
+    // last visible tab lands Home. The personal space keeps its exact previous
+    // behavior (the strip equals the full list there — same slot arithmetic).
+    if (closingVisibleIndex !== -1) {
+      const visibleAfter = get(visibleTabsAtom)
+      const replacement = visibleAfter[Math.min(closingVisibleIndex, visibleAfter.length - 1)]
+      set(activeTabIdAtom, replacement?.id ?? HOME_TAB_ID)
+      return
+    }
+    const replacement = nextTabs[Math.min(closingIndex, nextTabs.length - 1)]
+    set(activeTabIdAtom, replacement?.id ?? HOME_TAB_ID)
   },
 )
 

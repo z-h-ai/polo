@@ -3143,6 +3143,8 @@
   "topbar.account.toggleTheme": "切换主题",
   "topbar.account.workspaces": "工作区",
   "topbar.brand.home": "返回 Polo 首页",
+  "topbar.chatEntry.projectRequired": "请先创建或进入一个项目",
+  "topbar.chatEntry.sessionProjectUnavailable": "该会话所在项目已不可访问",
   "topbar.home": "首页",
   "topbar.nav.back": "后退",
   "topbar.nav.forward": "前进",

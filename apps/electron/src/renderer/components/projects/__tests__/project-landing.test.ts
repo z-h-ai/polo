@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { resolveProjectLanding, selectProjectSessionByProjectId, shouldLandProject } from '../enter-project'
+import { resolveChatEntryTarget, resolveProjectLanding, selectProjectSessionByProjectId, shouldLandProject } from '../enter-project'
 
 /**
  * POO-205 §10 (C3): the PROJECT LANDING resolver — NavigationProvider's
@@ -210,5 +210,80 @@ describe('shouldLandProject (C3-fix transition vs within-project)', () => {
 
   it('within a project: the project’s own focused session wins (user click)', () => {
     expect(land({ transition: false, isSessions: true, details: 'mine', hasLandingSession: true })).toBe(false)
+  })
+
+  // POO-205 C4 (R3): an explicit「新建会话」inside a project tab records the
+  // empty-state intent for THAT project. While it is armed, the within-project
+  // details=null re-land must NOT pull the stored/recent conversation back —
+  // the empty state IS the requested surface.
+  it('C4 R3: empty-state intent arms — same-project details=null does NOT re-land (has or has not a session)', () => {
+    expect(land({ transition: false, isSessions: true, details: 'none', hasLandingSession: true, emptyIntent: true })).toBe(false)
+    expect(land({ transition: false, isSessions: true, details: 'none', hasLandingSession: false, emptyIntent: true })).toBe(false)
+    // The intent only shields the SAME project's details=null case.
+    expect(land({ transition: true, isSessions: true, details: 'foreign', hasLandingSession: true, emptyIntent: true })).toBe(true)
+    expect(land({ transition: false, isSessions: true, details: 'unknown', hasLandingSession: true, emptyIntent: true })).toBe(false)
+  })
+
+  it('C4 R3: the intent is inert when not armed — C3 landing behavior is intact', () => {
+    // Default (no emptyIntent field) keeps every C3-fix expectation above.
+    expect(land({ transition: false, isSessions: true, details: 'none', hasLandingSession: true })).toBe(true)
+    expect(land({ transition: true, isSessions: true, details: 'none', hasLandingSession: true })).toBe(true)
+  })
+})
+
+// POO-205 C4 (R4): the chat-entry split — a pure function deciding where a
+// 「新建会话」 request lands in each committed space. The personal space keeps
+// its assistant-tab default; an enterprise space routes to the active project
+// tab, else the most recently VISITED project that is STILL VISIBLE, else the
+// home hint (「先创建或进入一个项目」).
+describe('resolveChatEntryTarget (C4 R4 chat-entry split)', () => {
+  const resolve = (input: Parameters<typeof resolveChatEntryTarget>[0]) => resolveChatEntryTarget(input)
+  const VISIBLE = [{ id: 'proj-a' }, { id: 'proj-b' }]
+
+  it('the personal space (and any un-committed/null space) keeps its assistant default', () => {
+    expect(resolve({ spaceKind: 'personal', activeTab: null, recentProjectIds: [], visibleProjects: VISIBLE }))
+      .toEqual({ kind: 'personal-default' })
+    expect(resolve({ spaceKind: null, activeTab: { type: 'project', project: { projectId: 'proj-a' } }, recentProjectIds: ['proj-a'], visibleProjects: VISIBLE }))
+      .toEqual({ kind: 'personal-default' })
+  })
+
+  it('an ACTIVE project tab wins — the entry opens THIS project (R3 empty state)', () => {
+    expect(resolve({
+      spaceKind: 'enterprise',
+      activeTab: { type: 'project', project: { projectId: 'proj-b' } },
+      recentProjectIds: ['proj-a'],
+      visibleProjects: VISIBLE,
+    })).toEqual({ kind: 'project', projectId: 'proj-b' })
+  })
+
+  it('no project tab: the most recently visited project that is STILL visible wins', () => {
+    expect(resolve({
+      spaceKind: 'enterprise',
+      activeTab: { type: 'home' },
+      recentProjectIds: ['proj-a', 'proj-b'],
+      visibleProjects: VISIBLE,
+    })).toEqual({ kind: 'project', projectId: 'proj-a' })
+  })
+
+  it('a recently visited project that is NO LONGER visible is skipped, not fatal', () => {
+    expect(resolve({
+      spaceKind: 'enterprise',
+      activeTab: { type: 'webapp' },
+      recentProjectIds: ['proj-gone', 'proj-b'],
+      visibleProjects: VISIBLE,
+    })).toEqual({ kind: 'project', projectId: 'proj-b' })
+    expect(resolve({
+      spaceKind: 'enterprise',
+      activeTab: null,
+      recentProjectIds: ['proj-gone'],
+      visibleProjects: VISIBLE,
+    })).toEqual({ kind: 'home-hint' })
+  })
+
+  it('no accessible project at all: home-hint (「先创建或进入一个项目」)', () => {
+    expect(resolve({ spaceKind: 'enterprise', activeTab: null, recentProjectIds: [], visibleProjects: [] }))
+      .toEqual({ kind: 'home-hint' })
+    expect(resolve({ spaceKind: 'enterprise', activeTab: { type: 'home' }, recentProjectIds: ['proj-x'], visibleProjects: [{ id: 'proj-y' }] }))
+      .toEqual({ kind: 'home-hint' })
   })
 })

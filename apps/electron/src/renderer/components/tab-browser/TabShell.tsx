@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useAtomValue } from 'jotai'
 import type { CircleReturnTargetIds } from '@polo-ai/shared/protocol'
 import { TabContent } from './TabContent'
 import { TopBar } from '@/components/app-shell/TopBar'
@@ -16,7 +17,12 @@ import {
   getSettingsPageScope,
   type SettingsSubpage,
 } from '../../../shared/settings-registry'
-import { HOME_TAB_ID, POLO_APP_DEFINITION } from '../../../shared/tab-browser-types'
+import {
+  cycleVisibleTab,
+  POLO_APP_DEFINITION,
+  resolveTabShortcutTarget,
+} from '../../../shared/tab-browser-types'
+import { committedSpaceKindAtom } from '@/atoms/tab-browser'
 import { useWorkbenchReady } from '@/hooks/useWorkbenchReady'
 
 interface TabShellProps {
@@ -39,6 +45,10 @@ function isEditableTarget(target: EventTarget | null): boolean {
 
 export function TabShell({ renderPolo, onReauthenticateRequest }: TabShellProps) {
   const { activeTab, activeTabId, isReady, openTabs, activateHome, activateTab, closeTab, openApp } = useTabShell()
+  // POO-205 C4: the committed-space kind gates the assistant hand-offs — in
+  // an enterprise space the assistant tab does not exist as a surface.
+  const committedSpaceKind = useAtomValue(committedSpaceKindAtom)
+  const enterpriseSpace = committedSpaceKind === 'enterprise'
   // POO-125: the shell-level global (Polo-scope) settings surface. `null` is
   // closed. Owned HERE — above every tab — so opening it never switches the
   // active tab and never touches the assistant's route, and the explicit
@@ -61,13 +71,24 @@ export function TabShell({ renderPolo, onReauthenticateRequest }: TabShellProps)
   // it and lets the normal assistant-scope navigation take over.
   const handleGlobalSettingsSubpageSelect = useCallback((subpage: SettingsSubpage) => {
     if (getSettingsPageScope(subpage) === 'assistant') {
+      // POO-205 C4 (X1): assistant-scope categories do not exist in an
+      // enterprise space (no assistant surface to hand off to) — the entry is
+      // filtered from the list, so a click here is a defensive close only.
       setGlobalSettingsSubpage(null)
+      if (enterpriseSpace) return
       openApp(POLO_APP_DEFINITION)
       navigate(routes.view.settings(subpage))
       return
     }
     setGlobalSettingsSubpage(subpage)
-  }, [openApp])
+  }, [openApp, enterpriseSpace])
+
+  // POO-205 C4 (X1): the global settings surface belongs to ONE tab's
+  // context. Any tab change (click, ⌘-digit, ⌘⇧[ ], close, an entry-routing
+  // hand-off) closes it — a stale surface must never cover the next tab.
+  useEffect(() => {
+    setGlobalSettingsSubpage(null)
+  }, [activeTabId])
 
   useEffect(() => {
     const root = document.documentElement
@@ -100,11 +121,16 @@ export function TabShell({ renderPolo, onReauthenticateRequest }: TabShellProps)
         return
       }
       if (nav.view || nav.action || nav.joinToken || nav.tabType === 'polo') {
+        // POO-205 C4: in an enterprise space the Polo tab is not a surface —
+        // deep links must NOT activate it. `action/new-session` is routed by
+        // NavigationContext's chat-entry split; a session deep link's project
+        // tab is opened by NavigationContext's session-focus handling.
+        if (enterpriseSpace) return
         const poloTab = openTabs.find((tab) => tab.type === 'polo')
         if (poloTab) activateTab(poloTab.id)
       }
     })
-  }, [isReady, activateTab, openTabs])
+  }, [isReady, activateTab, openTabs, enterpriseSpace])
 
   useEffect(() => {
     // POO-103: the account menu, the Polo app menu, Cmd+, and the native
@@ -137,6 +163,12 @@ export function TabShell({ renderPolo, onReauthenticateRequest }: TabShellProps)
       // home all-sessions navigator then shows every workspace session, which
       // is exactly the cross-project leak §10 forbids.
       if (activeTab?.type === 'project') return
+      // POO-205 C4 (R4): in an enterprise space the Polo tab is not a surface
+      // to surface. The `action/new-session` route is handled by
+      // NavigationContext's chat-entry split (project empty state / recent
+      // project / home hint); assistant-scope settings routes are unreachable
+      // from the filtered global list and the Polo-tab guard snaps Home.
+      if (enterpriseSpace) return
       openApp(POLO_APP_DEFINITION)
     }
     const handleGlobalSettings = (event: Event) => {
@@ -148,7 +180,7 @@ export function TabShell({ renderPolo, onReauthenticateRequest }: TabShellProps)
       window.removeEventListener(NAVIGATE_EVENT, handleNavigate)
       window.removeEventListener(GLOBAL_SETTINGS_EVENT, handleGlobalSettings)
     }
-  }, [isReady, openApp, activeTab])
+  }, [isReady, openApp, activeTab, enterpriseSpace])
 
   useEffect(() => {
     // Scope-neutral pre-hydration (Review R33/R34): keyboard shortcuts stay
@@ -171,27 +203,23 @@ export function TabShell({ renderPolo, onReauthenticateRequest }: TabShellProps)
       }
 
       if (/^[1-9]$/.test(event.key)) {
-        const index = Number(event.key) - 1
-        const tab = openTabs[index]
-        if (tab) {
-          event.preventDefault()
-          activateTab(tab.id)
-        } else if (index === 0) {
-          event.preventDefault()
-          activateHome()
-        }
+        // POO-205 C4 (R6): ⌘1 = Home; ⌘2…⌘9 walk the VISIBLE strip order
+        // (openTabs from the context already drops the enterprise-invisible
+        // Polo tab). The mapping is pure — resolveTabShortcutTarget.
+        const target = resolveTabShortcutTarget(Number(event.key), openTabs)
+        if (target.kind === 'none') return
+        event.preventDefault()
+        if (target.kind === 'tab') activateTab(target.tabId)
+        else activateHome()
         return
       }
 
       if (event.shiftKey && (event.key === '[' || event.key === ']')) {
+        // POO-205 C4 (R6): the cycle runs over Home + the VISIBLE tabs only.
         event.preventDefault()
-        const sequence = [HOME_TAB_ID, ...openTabs.map((tab) => tab.id)]
-        const currentIndex = Math.max(0, sequence.indexOf(activeTabId))
-        const delta = event.key === ']' ? 1 : -1
-        const nextIndex = (currentIndex + delta + sequence.length) % sequence.length
-        const nextId = sequence[nextIndex]
-        if (nextId === HOME_TAB_ID) activateHome()
-        else activateTab(nextId)
+        const target = cycleVisibleTab(activeTabId, openTabs, event.key === ']' ? 1 : -1)
+        if (target.kind === 'tab') activateTab(target.tabId)
+        else activateHome()
       }
     }
 

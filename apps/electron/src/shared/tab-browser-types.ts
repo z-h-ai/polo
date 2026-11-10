@@ -117,3 +117,37 @@ export function normalizeInstalledApps(apps: AppDefinition[] | undefined | null)
 
   return [...BUILTIN_APP_DEFINITIONS, ...webApps]
 }
+
+// ── POO-205 C4 (R6): keyboard tab navigation over VISIBLE tabs ──────────────
+// Pure helpers so the ⌘-digit and ⌘⇧[ ] mappings are unit-testable. Both take
+// the VISIBLE tab list (visibleTabsAtom — the Polo tab already filtered out in
+// an enterprise space), never the raw persisted list.
+
+export type TabShortcutTarget =
+  | { kind: 'home' }
+  | { kind: 'tab'; tabId: string }
+  | { kind: 'none' }
+
+/**
+ * ⌘1 = Home; ⌘2…⌘9 = the 1st…8th visible tab, in strip order. A digit beyond
+ * the strip (and ⌘1's Home is always available) answers 'none' — the shell
+ * keeps the previous tab rather than guessing.
+ */
+export function resolveTabShortcutTarget(digit: number, visibleTabs: ReadonlyArray<Pick<TabInstance, 'id'>>): TabShortcutTarget {
+  if (digit === 1) return { kind: 'home' }
+  const tab = visibleTabs[digit - 2]
+  return tab ? { kind: 'tab', tabId: tab.id } : { kind: 'none' }
+}
+
+/**
+ * ⌘⇧[ / ⌘⇧] cycles Home ⇄ the visible tabs, in strip order, wrapping at both
+ * ends. Unknown active ids (a tab closed between keypress and handler) ride
+ * as index 0 — the cycle simply starts over from Home.
+ */
+export function cycleVisibleTab(activeTabId: string, visibleTabs: ReadonlyArray<Pick<TabInstance, 'id'>>, direction: 1 | -1): TabShortcutTarget {
+  const sequence = [HOME_TAB_ID, ...visibleTabs.map((tab) => tab.id)]
+  const currentIndex = Math.max(0, sequence.indexOf(activeTabId))
+  const nextIndex = (currentIndex + direction + sequence.length) % sequence.length
+  const nextId = sequence[nextIndex]!
+  return nextId === HOME_TAB_ID ? { kind: 'home' } : { kind: 'tab', tabId: nextId }
+}

@@ -118,6 +118,12 @@ export type ProjectFocusedSession =
  *   skills/settings pages the user opened inside the project are never
  *   yanked back, an unknown meta is left alone, and details=null over an
  *   empty project IS the correct landing.
+ * - C4 (R3): an EXPLICIT empty-state request (「新建会话」 in a project tab)
+ *   must NOT be yanked back to the most recent conversation. While the
+ *   empty-intent flag for THIS project is set, details=null is accepted as
+ *   the landing even when the project has landable sessions. The intent is
+ *   project-bound: a tab switch invalidates it (and the transition branch
+ *   never consults it).
  */
 export function shouldLandProject(input: {
   /** activeProjectId differs from the last project this effect landed. */
@@ -127,6 +133,8 @@ export function shouldLandProject(input: {
   details: ProjectFocusedSession
   /** resolveProjectLanding answers a session (not the empty state). */
   hasLandingSession: boolean
+  /** The user explicitly requested THIS project's empty state (C4 R3). */
+  emptyIntent?: boolean
 }): boolean {
   if (input.transition) {
     return input.details !== 'mine'
@@ -139,8 +147,48 @@ export function shouldLandProject(input: {
     case 'mine':
       return false
     case 'none':
-      return input.hasLandingSession
+      return input.emptyIntent ? false : input.hasLandingSession
   }
+}
+
+/** POO-205 C4 (R4): where a "new chat" request lands in an ENTERPRISE
+ * committed space. Pure — the caller performs the tab/navigation side
+ * effects.
+ *
+ * - Inside a project tab: the project's OWN empty state (zero-write; R3).
+ * - On any other tab: the most recently VISITED project that is still in the
+ *   visible directory (visit order first, a project that has become
+ *   invisible is skipped, not fatal) — opened as a tab and landed on its
+ *   empty state.
+ * - No accessible project at all: home + the「先创建或进入一个项目」hint.
+ *
+ * The PERSONAL space never routes through this function (its assistant tab
+ * remains the default chat surface — `personal-default` exists so tests and
+ * callers can branch on the full shape).
+ */
+export type ChatEntryTarget =
+  | { kind: 'personal-default' }
+  | { kind: 'project'; projectId: string }
+  | { kind: 'home-hint' }
+
+export function resolveChatEntryTarget(input: {
+  spaceKind: 'personal' | 'enterprise' | null
+  /** The currently active tab instance, if any. */
+  activeTab: { type: string; project?: { projectId: string } } | null
+  /** Project ids, most recently visited first (readProjectVisitOrder). */
+  recentProjectIds: ReadonlyArray<string>
+  /** The projects the directory currently lists (visible + accessible). */
+  visibleProjects: ReadonlyArray<{ id: string }>
+}): ChatEntryTarget {
+  if (input.spaceKind !== 'enterprise') return { kind: 'personal-default' }
+  if (input.activeTab?.type === 'project' && input.activeTab.project?.projectId) {
+    return { kind: 'project', projectId: input.activeTab.project.projectId }
+  }
+  const visibleIds = new Set(input.visibleProjects.map(project => project.id))
+  for (const projectId of input.recentProjectIds) {
+    if (visibleIds.has(projectId)) return { kind: 'project', projectId }
+  }
+  return { kind: 'home-hint' }
 }
 
 /** Enter a project of the committed organization (lightweight). Returns the

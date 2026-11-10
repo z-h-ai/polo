@@ -3143,6 +3143,8 @@
   "topbar.account.toggleTheme": "Cambiar tema",
   "topbar.account.workspaces": "Workspaces",
   "topbar.brand.home": "Volver al inicio de Polo",
+  "topbar.chatEntry.projectRequired": "Cree o entre en un proyecto primero",
+  "topbar.chatEntry.sessionProjectUnavailable": "El proyecto de esta sesión ya no está accesible",
   "topbar.home": "Inicio",
   "topbar.nav.back": "Atrás",
   "topbar.nav.forward": "Adelante",

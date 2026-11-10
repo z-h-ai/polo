@@ -37,6 +37,15 @@ export interface NavigateOptions {
   targetLaneId?: 'main'
   /** Skip auto-selecting first item when navigating to a list view (used when closing panels) */
   skipAutoSelect?: boolean
+  /**
+   * POO-205 C4 (R3): the navigation is an EXPLICIT request for the active
+   * project's empty state (「新建会话」 inside a project tab / the chat-entry
+   * split). NavigationProvider records the intent for this project so the
+   * landing invariant and the auto-select-on-load effect leave details=null
+   * alone even when the project has landable sessions. Cleared when the
+   * project changes or a session gets focused.
+   */
+  projectEmptyIntent?: boolean
 }
 
 /**

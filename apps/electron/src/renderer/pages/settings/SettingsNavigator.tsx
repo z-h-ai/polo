@@ -12,6 +12,7 @@
 
 import { useState, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useAtomValue } from 'jotai'
 import { MoreHorizontal, AppWindow, Bot } from 'lucide-react'
 import {
   DropdownMenu,
@@ -28,6 +29,7 @@ import { ASSISTANT_SETTINGS_DEFAULT_SUBPAGE, DEFAULT_SETTINGS_SUBPAGE, getSettin
 import { getSettingsItemsForScope } from '../../../shared/menu-schema'
 import { SETTINGS_ICONS } from '@/components/icons/SettingsIcons'
 import { useOptionalAppShellContext } from '@/context/AppShellContext'
+import { committedSpaceKindAtom } from '@/atoms/tab-browser'
 
 export const meta: DetailsPageMeta = {
   navigator: 'settings',
@@ -168,6 +170,10 @@ export default function SettingsNavigator({
   const { t } = useTranslation()
   const appShell = useOptionalAppShellContext()
   const isAdminLoggedIn = Boolean(appShell?.currentAdminUser?.username)
+  // POO-205 C4 (X1): an enterprise committed space has NO assistant scope —
+  // the Polo navigator's cross-scope shortcut row (POO-103) drops out there.
+  // The personal space keeps it untouched.
+  const enterpriseSpace = useAtomValue(committedSpaceKindAtom) === 'enterprise'
 
   // One navigator lists a single scope. The scope follows the selected subpage
   // (single source: settings-registry). The bare `settings` route falls back
@@ -189,7 +195,7 @@ export default function SettingsNavigator({
     // scope (lands on its first category) so users can reach the assistant
     // settings directly from the account-menu surface. Clicking navigates to
     // a real assistant subpage — no new settings page, no registry entry.
-    if (scope === 'polo') {
+    if (scope === 'polo' && !enterpriseSpace) {
       items.push({
         id: ASSISTANT_SETTINGS_DEFAULT_SUBPAGE,
         label: t('settings.assistantShortcut.title'),
@@ -199,7 +205,7 @@ export default function SettingsNavigator({
       })
     }
     return items
-  }, [scope, isAdminLoggedIn, t])
+  }, [scope, isAdminLoggedIn, enterpriseSpace, t])
 
   return (
     <div className="flex flex-col h-full">

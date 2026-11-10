@@ -5,12 +5,14 @@ import {
   activeTabIdAtom,
   activateTabAtom,
   closeTabAtom,
+  committedSpaceKindAtom,
   installedAppsAtom,
   openAppTabAtom,
   openTabsAtom,
   reorderTabsAtom,
   setInstalledAppsAtom,
   updateTabInfoAtom,
+  visibleTabsAtom,
 } from '@/atoms/tab-browser'
 import { KEYS, get as getLocalStorage, set as setLocalStorage } from '@/lib/local-storage'
 import {
@@ -117,6 +119,9 @@ export function TabShellProvider({ workspaceId, productSpaceScope, children }: T
   const [openTabs, setOpenTabs] = useAtom(openTabsAtom)
   const [activeTabId, setActiveTabId] = useAtom(activeTabIdAtom)
   const activeTab = useAtomValue(activeTabAtom)
+  // POO-205 C4: the committed-space kind feeds visibleTabsAtom (the single
+  // source every visible-tab consumer reads) — see CommittedSpaceKindBridge.
+  const setCommittedSpaceKind = useSetAtom(committedSpaceKindAtom)
   const setInstalledApps = useSetAtom(setInstalledAppsAtom)
   const openAppTab = useSetAtom(openAppTabAtom)
   const closeTabWrite = useSetAtom(closeTabAtom)
@@ -198,6 +203,28 @@ export function TabShellProvider({ workspaceId, productSpaceScope, children }: T
     return () => window.clearTimeout(timer)
   }, [openTabs, storageScope])
 
+  // POO-205 C4 (A): the committed space kind is an ATOM input, not a prop —
+  // TopBar/TabShell/NavigationContext and the tab atoms themselves all read
+  // the same single source (visibleTabsAtom), the same way
+  // ProjectTabActiveProjectBridge publishes the active project. Null outside
+  // a committed space → every kind-gated behavior fails open to personal.
+  const committedSpaceKind = liveProductSpace?.activeProductSpace?.kind ?? null
+  useEffect(() => {
+    setCommittedSpaceKind(committedSpaceKind)
+    return () => { setCommittedSpaceKind(null) }
+  }, [committedSpaceKind, setCommittedSpaceKind])
+
+  // POO-205 C4 (A) guard: in an enterprise space the Polo tab must never be
+  // the active tab — it is hidden from the strip, so "active" would mean an
+  // invisible surface with a home-scope route. This is the catch-all for any
+  // entry the visible-tab rewire below cannot see (stray deep links, a stale
+  // snapshot restore); legit entries no longer produce this state.
+  useEffect(() => {
+    if (committedSpaceKind === 'enterprise' && activeTabId === POLO_TAB_ID) {
+      setActiveTabId(HOME_TAB_ID)
+    }
+  }, [committedSpaceKind, activeTabId, setActiveTabId])
+
   const persistApps = useCallback(async (apps: AppDefinition[]) => {
     const normalized = normalizeInstalledApps(apps)
     setInstalledAppsState(normalized)
@@ -248,7 +275,24 @@ export function TabShellProvider({ workspaceId, productSpaceScope, children }: T
   const currentTabs = useMemo(() => openTabs.filter(tabIsCurrent), [openTabs, liveProductSpace])
   const visibleTabs = useMemo(() => currentTabs.filter(tab => !tab.background), [currentTabs])
   const backgroundTabs = useMemo(() => currentTabs.filter(tab => tab.background), [currentTabs])
+  // POO-205 C4 (A): the context's openTabs is the SPACE-VISIBLE list — the
+  // retired Polo tab drops out in an enterprise space, so the strip, ⌘-digit
+  // / ⌘⇧[ ] mapping and drag-reorder all read one consistent surface. (The
+  // TabContent mounting and persistence keep reading the atoms directly.)
+  const spaceVisibleTabs = useMemo(
+    () => (committedSpaceKind === 'enterprise' ? visibleTabs.filter(tab => tab.type !== 'polo') : visibleTabs),
+    [visibleTabs, committedSpaceKind],
+  )
   const visibleActiveTab = activeTab && tabIsCurrent(activeTab) && !activeTab.background ? activeTab : null
+  // While the guard effect snaps the active id back to Home, context readers
+  // already see Home — one render of an invisible-active Polo tab is too many.
+  const poloActiveInEnterprise = committedSpaceKind === 'enterprise' && activeTabId === POLO_TAB_ID
+  const contextActiveTab = poloActiveInEnterprise
+    ? { id: HOME_TAB_ID, appId: HOME_TAB_ID, type: 'home' as const, title: 'Home' }
+    : (visibleActiveTab ?? { id: HOME_TAB_ID, appId: HOME_TAB_ID, type: 'home' as const, title: 'Home' })
+  const contextActiveTabId = poloActiveInEnterprise
+    ? HOME_TAB_ID
+    : (visibleActiveTab ? activeTabId : HOME_TAB_ID)
   const activeWebAppNavigation =
     visibleActiveTab?.type === 'webapp'
       ? webAppNavigation[visibleActiveTab.id] ?? null
@@ -256,10 +300,10 @@ export function TabShellProvider({ workspaceId, productSpaceScope, children }: T
 
   const value = useMemo<TabShellContextValue>(() => ({
     installedApps,
-    openTabs: visibleTabs,
+    openTabs: spaceVisibleTabs,
     backgroundTabs,
-    activeTab: visibleActiveTab ?? { id: HOME_TAB_ID, appId: HOME_TAB_ID, type: 'home', title: 'Home' },
-    activeTabId: visibleActiveTab ? activeTabId : HOME_TAB_ID,
+    activeTab: contextActiveTab,
+    activeTabId: contextActiveTabId,
     isReady,
     activeWebAppNavigation,
     webAppPartition,
@@ -283,8 +327,9 @@ export function TabShellProvider({ workspaceId, productSpaceScope, children }: T
     updateTabInfo,
     registerWebAppNavigation,
   }), [
-    visibleActiveTab,
-    visibleTabs,
+    contextActiveTab,
+    contextActiveTabId,
+    spaceVisibleTabs,
     backgroundTabs,
     activeTabId,
     activeWebAppNavigation,

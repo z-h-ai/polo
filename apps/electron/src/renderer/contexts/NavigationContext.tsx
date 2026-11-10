@@ -76,8 +76,25 @@ import {
 import { sessionMetaMapAtom, updateSessionMetaAtom, type SessionMeta } from '@/atoms/sessions'
 import { sourcesAtom } from '@/atoms/sources'
 import { skillsAtom } from '@/atoms/skills'
+import {
+  activeTabAtom,
+  activeTabIdAtom,
+  activateTabAtom,
+  committedSpaceKindAtom,
+  openTabsAtom,
+} from '@/atoms/tab-browser'
+import { HOME_TAB_ID, projectTabId } from '../../shared/tab-browser-types'
 import { subscribeActiveProject, getActiveProjectRaw } from '@/components/projects/projects-bus'
-import { resolveProjectLanding, selectProjectSessionByProjectId, shouldLandProject, type ProjectFocusedSession } from '@/components/projects/enter-project'
+import {
+  enterProjectLightweight,
+  resolveChatEntryTarget,
+  resolveProjectLanding,
+  selectProjectSessionByProjectId,
+  shouldLandProject,
+  type ProjectFocusedSession,
+} from '@/components/projects/enter-project'
+import { readProjectVisitOrder } from '@/lib/project-directory'
+import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
 import {
   panelStackAtom,
   pushPanelAtom,
@@ -223,6 +240,24 @@ export function NavigationProvider({
   // persistence must not leak across projects.
   const activeProject = useSyncExternalStore(subscribeActiveProject, getActiveProjectRaw)
   const activeProjectId = activeProject?.projectId ?? null
+
+  // POO-205 C4 (R4): the committed space kind gates the chat-entry split and
+  // the session-focus tab routing. The atoms are the shared source published
+  // by TabShellProvider's bridge.
+  const committedSpaceKind = useAtomValue(committedSpaceKindAtom)
+  const productSpaceContext = useOptionalProductSpaceContext()
+  // POO-205 C4 (R3): the EXPLICIT empty-state intent for a project (「新建会
+  // 话」 in a project tab / the chat-entry split). While set for the ACTIVE
+  // project, details=null is a valid landing even when landable sessions
+  // exist, and the auto-select-on-load effect stays out of the way. Cleared
+  // by the landing invariant when a session gets focused or the project
+  // changes (a project-bound intent dies with the project switch).
+  const emptyIntentProjectIdRef = useRef<string | null>(null)
+  // POO-205 C3-fix: the project whose conversation the landing invariant last
+  // landed (declared here — navigate()'s empty-intent path also writes it, an
+  // explicit empty state IS the landing). See the PROJECT LANDING INVARIANT
+  // effect below for the two-regime logic.
+  const landedProjectIdRef = useRef<string | null>(null)
 
   // =========================================================================
   // DERIVED NAVIGATION STATE (from focused panel + right sidebar)
@@ -702,13 +737,17 @@ export function NavigationProvider({
       // Validate session exists in current workspace (local or remote ID).
       // POO-205 §10: while a project tab is active the session must ALSO
       // belong to that project — anything else is a cross-project leak.
+      // C4: the active project is read from the bus AT CALL TIME — a session
+      // focus that first activates a project tab and then navigates runs in
+      // one synchronous pass, before the bridge effect republishes the bus.
       if (isSessionsNavigation(nextState) && nextState.details) {
         const freshMetaMap = store.get(sessionMetaMapAtom)
         const meta = freshMetaMap.get(nextState.details.sessionId)
+        const currentProjectId = getActiveProjectRaw()?.projectId ?? null
         const matchesWorkspace = !workspaceId
           || meta?.workspaceId === workspaceId
           || (remoteWorkspaceId && meta?.workspaceId === remoteWorkspaceId)
-        const matchesProject = !activeProjectId || meta?.projectId === activeProjectId
+        const matchesProject = !currentProjectId || meta?.projectId === currentProjectId
         if (!meta || !matchesWorkspace || !matchesProject) {
           nextState = { ...nextState, details: null }
         }
@@ -743,12 +782,139 @@ export function NavigationProvider({
 
       return nextState
     },
-    [store, workspaceId, activeProjectId, remoteWorkspaceId, resolveSessionsFallback, getFirstSourceSlug, getFirstSkillSlug]
+    [store, workspaceId, remoteWorkspaceId, resolveSessionsFallback, getFirstSourceSlug, getFirstSkillSlug]
   )
 
   // Ref keeps resolveAutoSelection fresh for reconcileFromUrlParams (defined earlier in the file)
   const resolveAutoSelectionRef = useRef(resolveAutoSelection)
   useEffect(() => { resolveAutoSelectionRef.current = resolveAutoSelection }, [resolveAutoSelection])
+
+  // =========================================================================
+  // POO-205 C4 (R3/R4/F): ENTERPRISE CHAT-ENTRY SPLIT + SESSION FOCUS
+  // =========================================================================
+
+  // Late-bound navigate: the chat-entry helpers run BEFORE navigate is
+  // declared (handleActionNavigation → new-session needs the split), and
+  // navigate itself depends on handleActionNavigation — a ref breaks the
+  // declaration cycle (same pattern as resolveAutoSelectionRef above).
+  const navigateRef = useRef<(route: Route, options?: NavigateOptions) => void | Promise<void>>(() => {})
+
+  /** Land the ACTIVE project's editable empty state — zero-write (R3): no
+   * session is created until the first send. The empty-intent flag plus the
+   * landed-project marker are both set inside navigate() so the landing
+   * invariant and auto-select stay out of the way. */
+  const landProjectEmptyState = useCallback(() => {
+    void navigateRef.current(routes.view.allSessions(), { skipAutoSelect: true, projectEmptyIntent: true })
+  }, [])
+
+  /** POO-205 C4 (F): make sure a session's own project tab is active before
+   * the session navigates. Enterprise-only; personal returns immediately.
+   * Returns false ONLY when the session's project is no longer in the
+   * visible directory — the caller then aborts (Home + hint already shown).
+   * The active project is read from the bus AT CALL TIME, so a tab activation
+   * inside this function is already visible to the navigation that follows. */
+  const ensureProjectTabForSession = useCallback(async (sessionId: string): Promise<boolean> => {
+    if (store.get(committedSpaceKindAtom) !== 'enterprise') return true
+
+    let projectId = store.get(sessionMetaMapAtom).get(sessionId)?.projectId ?? null
+    if (!projectId) {
+      // F: the meta has not landed in the map yet — read the session list once.
+      try {
+        const sessions: Session[] = await window.electronAPI.getSessions()
+        projectId = sessions.find(session => session.id === sessionId)?.projectId ?? null
+      } catch {
+        projectId = null
+      }
+    }
+    if (!projectId) return true // unknown/personal binding — navigate normally
+
+    const tabId = projectTabId(projectId)
+    if (store.get(openTabsAtom).some(tab => tab.id === tabId)) {
+      if (store.get(activeTabIdAtom) !== tabId) store.set(activateTabAtom, tabId)
+      return true
+    }
+
+    // The project tab is closed: only a VISIBLE project may be reopened.
+    const scope = productSpaceContext
+    if (!scope || scope.activeProductSpace.kind !== 'enterprise') return true
+    let project
+    try {
+      const response = await window.electronAPI.pmListProjects({
+        accountId: scope.accountId,
+        productSpaceId: scope.activeProductSpaceId,
+        organizationEnterpriseId: scope.activeProductSpace.enterpriseId,
+      })
+      project = response.projects.find(candidate => candidate.id === projectId)
+    } catch {
+      project = undefined
+    }
+    if (!project) {
+      store.set(activeTabIdAtom, HOME_TAB_ID)
+      toast.error(t('topbar.chatEntry.sessionProjectUnavailable'))
+      return false
+    }
+    await enterProjectLightweight(scope.accountId, {
+      id: project.id,
+      organizationEnterpriseId: scope.activeProductSpace.enterpriseId,
+      organizationProductSpaceId: project.organizationProductSpaceId,
+      name: project.name,
+      ...(project.purpose ? { purpose: project.purpose } : {}),
+      ...(project.instructions ? { instructions: project.instructions } : {}),
+      myRole: project.myRole,
+    }, store)
+    return true
+  }, [store, t, productSpaceContext])
+
+  /** POO-205 C4 (R3/R4): the `action/new-session` landing in an ENTERPRISE
+   * space — reached from ⌘N/⌘⇧N, the native menu, the account menu and deep
+   * links alike. Inside the project tab: the project's own empty state
+   * (zero-write). Anywhere else: the most recent VISITED project that is
+   * still visible, landed on ITS empty state; with no accessible project,
+   * Home + the create/enter hint. The personal space never reaches this. */
+  const routeEnterpriseNewSession = useCallback(async (): Promise<void> => {
+    const currentProjectId = getActiveProjectRaw()?.projectId ?? null
+    if (currentProjectId) {
+      landProjectEmptyState()
+      return
+    }
+    const scope = productSpaceContext
+    if (!scope || scope.activeProductSpace.kind !== 'enterprise') return
+    let projects: Array<{ id: string; name: string; myRole: 'owner' | 'manager' | 'member'; purpose?: string; instructions?: string; organizationProductSpaceId: string }> = []
+    try {
+      const response = await window.electronAPI.pmListProjects({
+        accountId: scope.accountId,
+        productSpaceId: scope.activeProductSpaceId,
+        organizationEnterpriseId: scope.activeProductSpace.enterpriseId,
+      })
+      projects = response.projects
+    } catch {
+      projects = []
+    }
+    const target = resolveChatEntryTarget({
+      spaceKind: 'enterprise',
+      activeTab: store.get(activeTabAtom),
+      recentProjectIds: readProjectVisitOrder(scope.accountId).map(record => record.productSpaceId),
+      visibleProjects: projects,
+    })
+    const project = target.kind === 'project'
+      ? projects.find(candidate => candidate.id === target.projectId)
+      : undefined
+    if (!project) {
+      store.set(activeTabIdAtom, HOME_TAB_ID)
+      toast.error(t('topbar.chatEntry.projectRequired'))
+      return
+    }
+    await enterProjectLightweight(scope.accountId, {
+      id: project.id,
+      organizationEnterpriseId: scope.activeProductSpace.enterpriseId,
+      organizationProductSpaceId: project.organizationProductSpaceId,
+      name: project.name,
+      ...(project.purpose ? { purpose: project.purpose } : {}),
+      ...(project.instructions ? { instructions: project.instructions } : {}),
+      myRole: project.myRole,
+    }, store)
+    landProjectEmptyState()
+  }, [landProjectEmptyState, productSpaceContext, store, t])
 
   // =========================================================================
   // ACTION NAVIGATION
@@ -778,6 +944,14 @@ export function NavigationProvider({
 
       switch (parsed.name) {
         case 'new-session': {
+          // POO-205 C4 (R3/R4): in an enterprise committed space a new-chat
+          // request NEVER creates a session — it lands a project empty state
+          // (project tab) / the recent visible project (other tabs) / Home +
+          // hint. No empty session is ever persisted (R3 存量空会话不删).
+          if (store.get(committedSpaceKindAtom) === 'enterprise') {
+            await routeEnterpriseNewSession()
+            break
+          }
           try {
             const createOptions: import('../../shared/types').CreateSessionOptions = {}
             if (callbackId) {
@@ -1023,7 +1197,7 @@ export function NavigationProvider({
           console.warn('[Navigation] Unknown action:', parsed.name)
       }
     },
-    [workspaceId, onCreateSession, onInputChange, pushPanel, store, updateSessionMeta, t, onCaptureSendAttempt, onApplySendFailure]
+    [workspaceId, onCreateSession, onInputChange, pushPanel, store, updateSessionMeta, t, onCaptureSendAttempt, onApplySendFailure, routeEnterpriseNewSession]
   )
 
   // =========================================================================
@@ -1035,6 +1209,17 @@ export function NavigationProvider({
       // Reset auto-select suppression on any normal navigation
       if (!options?.skipAutoSelect) {
         suppressAutoSelectRef.current = false
+      }
+
+      // POO-205 C4 (R3): an explicit empty-state request IS the landing for
+      // the project it names. Record the intent AND mark the project landed
+      // (bus read at call time — an entry split may have activated the tab in
+      // the same synchronous pass) so the invariant's transition branch cannot
+      // yank the empty state back to the most recent conversation.
+      if (options?.projectEmptyIntent) {
+        const emptyIntentProjectId = getActiveProjectRaw()?.projectId ?? null
+        emptyIntentProjectIdRef.current = emptyIntentProjectId
+        if (emptyIntentProjectId) landedProjectIdRef.current = emptyIntentProjectId
       }
 
       const parsed = parseRoute(route)
@@ -1075,6 +1260,19 @@ export function NavigationProvider({
       // would defeat the compact-mode drill-in UX.
       const newNavState = parseRouteToNavigationState(route)
 
+      // POO-205 C4 (F): a session focus in an enterprise space must land in
+      // the session's OWN project tab (open it if needed). A project that is
+      // no longer visible aborts the navigation entirely (Home + hint).
+      if (
+        newNavState
+        && isSessionsNavigation(newNavState)
+        && newNavState.details
+        && !options?.projectEmptyIntent
+      ) {
+        const focused = await ensureProjectTabForSession(newNavState.details.sessionId)
+        if (!focused) return
+      }
+
       // Suppress auto-select effect
       if (options?.skipAutoSelect) {
         suppressAutoSelectRef.current = true
@@ -1088,11 +1286,13 @@ export function NavigationProvider({
         // Persist last selected session for auto-select on next visit.
         // POO-205 §10: project-scoped while a project tab is active (the
         // details were already validated against the active project above).
+        // C4: the scope reads the bus AT CALL TIME (see resolveAutoSelection).
         if (isSessionsNavigation(resolvedState) && resolvedState.details && workspaceId) {
+          const persistedProjectId = getActiveProjectRaw()?.projectId ?? null
           storage.set(
             storage.KEYS.lastSelectedSessionId,
             resolvedState.details.sessionId,
-            activeProjectId ? `${workspaceId}:project:${activeProjectId}` : workspaceId
+            persistedProjectId ? `${workspaceId}:project:${persistedProjectId}` : workspaceId
           )
         }
 
@@ -1101,8 +1301,14 @@ export function NavigationProvider({
         store.set(updateFocusedPanelRouteAtom, finalRoute)
       }
     },
-    [isReady, handleActionNavigation, resolveAutoSelection, store, pushPanel, workspaceId]
+    [isReady, handleActionNavigation, resolveAutoSelection, store, pushPanel, workspaceId, ensureProjectTabForSession]
   )
+
+  // Late-bound navigate pointer for the C4 chat-entry helpers (see the ref's
+  // declaration above). Keep it fresh on every identity change.
+  useEffect(() => {
+    navigateRef.current = navigate
+  }, [navigate])
 
   // =========================================================================
   // BACK / FORWARD (browser history)
@@ -1426,6 +1632,10 @@ export function NavigationProvider({
     // Don't auto-select when panel stack is empty (user closed all panels)
     if (store.get(panelStackAtom).length === 0) return
     if (!isSessionsNavigation(navigationState) || navigationState.details) return
+    // POO-205 C4 (R3): an explicit empty-state intent for the active project
+    // keeps this effect out — the user asked for the empty state, not for the
+    // most recent conversation.
+    if (emptyIntentProjectIdRef.current !== null && emptyIntentProjectIdRef.current === activeProjectId) return
 
     const fallbackSessionId = resolveSessionsFallback(navigationState.filter)
     if (!fallbackSessionId) return
@@ -1434,6 +1644,7 @@ export function NavigationProvider({
   }, [
     isReady,
     workspaceId,
+    activeProjectId,
     navigationState,
     resolveSessionsFallback,
     navigateToSession,
@@ -1445,7 +1656,8 @@ export function NavigationProvider({
   // =========================================================================
 
   // While a project tab is active, the focused session must belong to THAT
-  // project. `landedProjectIdRef` separates the two regimes:
+  // project. `landedProjectIdRef` (declared beside emptyIntentProjectIdRef)
+  // separates the two regimes:
   // - PROJECT TRANSITION (entering, tab A ⇄ B, restart restore): the landing
   //   runs NO MATTER which navigator the panel is showing — sources/skills/
   //   settings must not survive a project switch (C3-fix).
@@ -1456,12 +1668,12 @@ export function NavigationProvider({
   // conversation → the project empty state (skipAutoSelect — never a
   // fabricated selection, never a created session). A session the user just
   // clicked still wins: its known meta belongs to the project.
-  const landedProjectIdRef = useRef<string | null>(null)
   useEffect(() => {
     if (!activeProjectId) {
       // Home / non-project tab: forget the landed project so re-entering the
-      // SAME project re-runs its landing.
+      // SAME project re-runs its landing; the empty-state intent dies with it.
       landedProjectIdRef.current = null
+      emptyIntentProjectIdRef.current = null
       return
     }
     // Not ready → don't record the project; the next pass re-decides.
@@ -1492,7 +1704,13 @@ export function NavigationProvider({
     const storedId = getLastSelectedSessionId(landingFilter)
     const landing = resolveProjectLanding(sessionMetas, activeProjectId, storedId)
     const transition = landedProjectIdRef.current !== activeProjectId
-    if (!shouldLandProject({ transition, isSessions, details, hasLandingSession: landing.kind === 'session' })) {
+    // POO-205 C4 (R3): the explicit empty-state intent is PROJECT-BOUND — it
+    // only shields the project it was requested for, and any session focus
+    // inside the project retires it immediately.
+    const emptyIntent = emptyIntentProjectIdRef.current !== null
+      && emptyIntentProjectIdRef.current === activeProjectId
+    if (details !== 'none') emptyIntentProjectIdRef.current = null
+    if (!shouldLandProject({ transition, isSessions, details, hasLandingSession: landing.kind === 'session', emptyIntent })) {
       landedProjectIdRef.current = activeProjectId
       return
     }

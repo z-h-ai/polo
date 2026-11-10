@@ -3143,6 +3143,8 @@
   "topbar.account.toggleTheme": "Téma váltása",
   "topbar.account.workspaces": "Workspaces",
   "topbar.brand.home": "Vissza a Polo kezdőlapjára",
+  "topbar.chatEntry.projectRequired": "Először hozzon létre vagy lépjen be egy projektbe",
+  "topbar.chatEntry.sessionProjectUnavailable": "A munkamenet projektje már nem érhető el",
   "topbar.home": "Kezdőlap",
   "topbar.nav.back": "Vissza",
   "topbar.nav.forward": "Előre",

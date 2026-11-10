@@ -76,6 +76,12 @@ function TabIcon({ tab }: { tab: TabInstance }) {
   if (tab.type === "polo") {
     return <img src={poloAppIcon} alt="" className="h-3.5 w-3.5 shrink-0 object-contain" />
   }
+  // POO-205 C4 (R6): a project tab shows the folder metaphor the sidebar
+  // already uses for container-ish nodes (FolderOpen on the local-folders
+  // row) — not a generic web page globe.
+  if (tab.type === "project") {
+    return <Icons.FolderOpen className="h-3.5 w-3.5 text-foreground/65" strokeWidth={1.5} />
+  }
   return <Icons.Globe2 className="h-3.5 w-3.5 text-foreground/65" strokeWidth={1.5} />
 }
 
@@ -196,22 +202,30 @@ export function TopBar() {
   const userLabel = user?.displayName || user?.username || ""
   const userInitial = userLabel.trim().charAt(0)
 
-  // POO-205 Spec §10: in an ENTERPRISE committed space the Polo tab retires —
-  // chat lives ONLY inside project tabs (title = project name). The personal
-  // space keeps the assistant tab as its default chat surface.
-  const committedSpaceKind = productSpace?.activeProductSpace?.kind
-  const hidePoloTab = committedSpaceKind === "enterprise"
-  const stripTabs = hidePoloTab
-    ? openTabs.filter((tab) => tab.type !== "polo")
-    : openTabs
-  const projectTabs = stripTabs.filter((tab) => tab.type === "project")
+  // POO-205 Spec §10 / C4 (A): in an ENTERPRISE committed space the Polo tab
+  // retires — chat lives ONLY inside project tabs (title = project name). The
+  // strip reads the CONTEXT's openTabs, which is already the space-visible
+  // list (visibleTabsAtom contract); there is no second filter to drift.
+  const stripTabs = openTabs
   const openPoloTab = openTabs.find((tab) => tab.type === "polo")
 
   const openSessionFromNotification = (sessionId: string) => {
-    if (openPoloTab) activateTab(openPoloTab.id)
-    // The bar lives above NavigationProvider (inside TabShell), so the click
-    // routes through the global navigate event the NavigationContext listens
-    // for instead of the hook.
+    // POO-205 C4 (R4/F): in an enterprise space a notification click focuses
+    // the session's OWN project tab when it is already open (the session's
+    // meta.projectId). Opening a closed tab, the getSessions fallback and the
+    // not-visible-project toast all live in NavigationContext's
+    // session-focus handling — this click just routes through the global
+    // navigate event (the bar lives above NavigationProvider).
+    const meta = sessionMetaMap.get(sessionId)
+    const projectId = meta?.projectId ?? null
+    const projectTab = projectId
+      ? openTabs.find((tab) => tab.type === "project" && tab.project?.projectId === projectId)
+      : null
+    if (projectTab) {
+      activateTab(projectTab.id)
+    } else if (!projectId && openPoloTab) {
+      activateTab(openPoloTab.id)
+    }
     navigate(routes.view.allSessions(sessionId))
   }
 

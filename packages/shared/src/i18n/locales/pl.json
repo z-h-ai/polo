@@ -3151,6 +3151,8 @@
   "topbar.account.toggleTheme": "Przełącz motyw",
   "topbar.account.workspaces": "Workspaces",
   "topbar.brand.home": "Wróć do strony głównej Polo",
+  "topbar.chatEntry.projectRequired": "Najpierw utwórz lub otwórz projekt",
+  "topbar.chatEntry.sessionProjectUnavailable": "Projekt tej sesji nie jest już dostępny",
   "topbar.home": "Strona główna",
   "topbar.nav.back": "Wstecz",
   "topbar.nav.forward": "Dalej",
