@@ -42,6 +42,7 @@ import {
   type ProjectVisitRecord,
 } from '@/lib/project-directory'
 import { PinnedCanvasApps } from './PinnedCanvasApps'
+import { ProductSpaceSkillsDialog } from '@/components/product-space/ProductSpaceSkillsDialog'
 import {
   catalogStateMessage,
   homeAppErrorPresentation,
@@ -86,7 +87,11 @@ export { formatBytes }
  * Polo assistant is a base capability and the knowledge base retired into the
  * project shared-file area; the directory splits into the 「我的应用」
  * partition (the member's own saved apps, with the enterprise-only publish /
- * withdraw actions) BEFORE the shared app grid. The former quick-access main
+ * withdraw actions). C11 (R15) IA order: hero → 项目区 (enterprise only) →
+ * fixed canvas → 「应用」segment (title + manage-skills → toolbar → banners →
+ * shared grid → restore/vacuum faces, all adjacent) → 「我的应用」 (AFTER the
+ * shared grid); with both partitions empty ONE merged empty state speaks for
+ * both. The former quick-access main
  * flow (writer registry, manage dialog, pin/prune, the nested All-Apps view
  * and the page-internal MemberCatalogProvider mount) is retired from this
  * page: the single `useAppCatalog` instance now lives in the App-level
@@ -291,6 +296,10 @@ export function HomePage({ onEnterProject }: {
   // transient: a fresh error face starts collapsed.
   const [versionGuideOpen, setVersionGuideOpen] = useState(false)
   const [showCirclesCard, setShowCirclesCard] = useState(false)
+  // C11 (R16): the「应用」section header's manage-skills entry mounts the
+  // existing ProductSpaceSkillsDialog — its first production mount (the
+  // former assistant card retired). Local and transient.
+  const [skillsDialogOpen, setSkillsDialogOpen] = useState(false)
   const [uninstallTarget, setUninstallTarget] = useState<CatalogApp | null>(null)
   const [preserveData, setPreserveData] = useState(true)
   // Directory toolbar state: search, source filter and sort.
@@ -501,8 +510,12 @@ export function HomePage({ onEnterProject }: {
   // an active query suspends the truncation — every match renders.
   const cardVisibilityClass = (index: number): string => {
     if (projectQueryActive || projectsExpanded || index < 2) return ''
-    if (index < 4) return 'hidden min-[761px]:block'
-    return 'hidden min-[761px]:hidden min-[1081px]:block'
+    // C11 collapse fix: the visibility variants restore `flex` (the card's
+    // own display), never `block` — a `:block` variant overrode the card's
+    // base `flex` at ≥761px and collapsed the flex-col card (title/meta rows
+    // stacked as blocks). Truncation semantics and breakpoints unchanged.
+    if (index < 4) return 'hidden min-[761px]:flex'
+    return 'hidden min-[761px]:hidden min-[1081px]:flex'
   }
   const projectsOverflow = sortedProjects.length > 2
   const expandRowClass = sortedProjects.length > 6
@@ -736,6 +749,14 @@ export function HomePage({ onEnterProject }: {
   // A fully-rejected directory is NOT a vacuum (H1 reviewer contract): the
   // empty phase must be consumed together with rejections.length.
   const directoryRejected = directoryEmpty && directory.rejections.length > 0
+  // C11 (R15): the MERGED vacuum — when both partitions are verifiably empty
+  // the page renders ONE empty state (in the shared-grid section) speaking
+  // for BOTH. The 我的应用 partition counts as verifiably empty only when its
+  // own load finished without an error: loading and failure keep their own
+  // faces and never merge into an honest-vacuum claim.
+  const myAppsReady = !myApps.state.loading && !myApps.state.errorCode
+  const bothPartitionsEmpty = directoryEmpty && !directoryRejected
+    && myAppsReady && directory.myApps.length === 0
 
   return (
     // Frozen POO-41 `.main` mirror: the centered 1260px column with the
@@ -819,13 +840,16 @@ export function HomePage({ onEnterProject }: {
       (circles card fallback) is the block's only remaining mount. */}
 
       {/* POO-196 R3 (P1/P2): the「项目」区域 — always present between the hero
-      and the fixed canvas, on personal, organization and project homes
-      alike. Header = title left + the U9 RESIDENT name search middle + the
-      ONLY create entry right (P11); the app toolbar below is untouched
-      (search/source/sort stay app-scoped). When the container cannot fit all
-      three, the search wraps onto its own full-width row — it never degrades
-      into an unlabeled icon. */}
-      {spaceContext && (
+      and the fixed canvas on ENTERPRISE homes. POO-205 C11 (R15): a personal
+      space has no project scope at all — the whole section (title, resident
+      search, the ONLY create entry, states and expand row) stays off the
+      page instead of rendering a directory that could only fail. Header =
+      title left + the U9 RESIDENT name search middle + the ONLY create entry
+      right (P11); the app toolbar below is untouched (search/source/sort
+      stay app-scoped). When the container cannot fit all three, the search
+      wraps onto its own full-width row — it never degrades into an
+      unlabeled icon. */}
+      {spaceContext && spaceKind !== 'personal' && (
         <section data-testid="home-projects" className="mb-[36px]">
           <div className="mb-[16px] flex flex-wrap items-end justify-between gap-[12px]">
             <div className="min-w-0">
@@ -865,10 +889,13 @@ export function HomePage({ onEnterProject }: {
             while the hosted-dialog callback exists (an isolated mount without
             it must not show a dead button). */}
             {typeof spaceContext.onOpenCreateProject === 'function' && (
+              /* C11 (R15): aligned with the client-workbench primary-button
+              spec (min-h-[32px] / text-[14px] / rounded-[8px]) instead of the
+              former hand-written 12px face. */
               <button
                 type="button"
                 data-testid="home-project-create"
-                className="inline-flex min-h-[32px] shrink-0 items-center justify-center gap-[6px] whitespace-nowrap rounded-[8px] border border-accent bg-accent px-[12px] text-[12px] font-semibold text-white shadow-minimal transition-[box-shadow,transform] duration-200 hover:-translate-y-[1px] hover:shadow-middle"
+                className={clientWorkbenchPrimaryClassName + ' shrink-0 whitespace-nowrap'}
                 onClick={() => spaceContext.onOpenCreateProject?.()}
               >
                 <Icons.Plus className="size-[14px]" aria-hidden="true" />
@@ -1121,14 +1148,33 @@ export function HomePage({ onEnterProject }: {
 
       {/* POO-196 R3 (P1): the「应用」分区标题 marks the app region so the
       project section above and the app toolbar below have clearly scoped
-      labels — search/source/sort keep applying to Apps ONLY. */}
+      labels — search/source/sort keep applying to Apps ONLY. C11 (R16): the
+      header row carries the manage-skills entry (enterprise homes only) —
+      the ProductSpaceSkillsDialog's production mount (its former assistant
+      card retired). The dialog's data source is the OPEN-time
+      productSpaceListSkills read with its own fail-visible error face; there
+      is no separate pre-open permission probe, so the entry shows for every
+      member of a committed enterprise space. */}
       {catalog.productSpace && (
-        <h2
-          className="m-0 mb-[16px] text-[20px] font-[720] tracking-[-0.03em]"
-          data-testid="home-apps-title"
-        >
-          {t('home.apps.title')}
-        </h2>
+        <div className="mb-[16px] flex flex-wrap items-center justify-between gap-[12px]">
+          <h2
+            className="m-0 text-[20px] font-[720] tracking-[-0.03em]"
+            data-testid="home-apps-title"
+          >
+            {t('home.apps.title')}
+          </h2>
+          {spaceKind === 'enterprise' && (
+            <button
+              type="button"
+              data-testid="home-apps-manage-skills"
+              className={clientWorkbenchButtonClassName + ' inline-flex items-center justify-center'}
+              onClick={() => setSkillsDialogOpen(true)}
+            >
+              <Icons.Settings2 className="size-[15px]" aria-hidden="true" />
+              {t('home.appsSection.manageSkills')}
+            </button>
+          )}
+        </div>
       )}
 
       {/* Prototype `.r14-toolbar`: search + source filter + sort. Hidden when
@@ -1230,165 +1276,6 @@ export function HomePage({ onEnterProject }: {
             {t('homeApps.actions.tryAgain')}
           </button>
         </div>
-      )}
-
-      {/* POO-205 (Q7/Q11) 「我的应用」分区 — BEFORE the shared directory.
-      The member's own saved canvas apps of THIS space, each with the open
-      action and (enterprise spaces only) the explicit publish / withdraw
-      actions. The partition carries its own title, vacuum and failure faces;
-      a personal space renders the same partition WITHOUT the publish entry. */}
-      {catalog.productSpace && (
-        <section className="mb-[36px]" data-testid="home-my-apps">
-          <div className="mb-[16px] flex flex-wrap items-center justify-between gap-[12px]">
-            <div className="flex min-w-0 items-center gap-[10px]">
-              <h2
-                className="m-0 text-[20px] font-[720] tracking-[-0.03em]"
-                data-testid="home-my-apps-title"
-              >
-                {t('poo205.myApps.title')}
-              </h2>
-              <span className="inline-flex min-h-[20px] items-center rounded-full bg-foreground-5 px-[8px] text-[12px] font-medium text-muted-foreground">
-                {myApps.state.apps.length}
-              </span>
-            </div>
-            <p className="m-0 min-w-0 flex-1 text-[13px] leading-[1.5] text-foreground-60">
-              {t('poo205.myApps.subtitle')}
-            </p>
-          </div>
-          {myApps.state.loading ? (
-            <div
-              className="flex min-h-[120px] items-center justify-center rounded-[20px] border border-foreground/10 bg-surface client-material-card"
-              data-testid="home-my-apps-loading"
-            >
-              <Icons.LoaderCircle className="size-5 animate-spin text-muted-foreground" />
-            </div>
-          ) : myApps.state.errorCode ? (
-            <div
-              className="grid justify-items-center gap-[8px] rounded-[20px] border border-dashed border-border px-[20px] py-[24px] text-center"
-              data-testid="home-my-apps-error"
-            >
-              <Icons.CloudOff className="size-[18px] text-muted-foreground" aria-hidden="true" />
-              <p className="m-0 text-[13px] text-muted-foreground">
-                {t('poo205.myApps.loadFailed')}
-              </p>
-              <button
-                type="button"
-                data-testid="home-my-apps-retry"
-                className="inline-flex min-h-[28px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[10px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
-                onClick={() => { void myApps.refresh() }}
-              >
-                {t('homeApps.actions.tryAgain')}
-              </button>
-            </div>
-          ) : directory.myApps.length === 0 ? (
-            <div
-              className="rounded-[20px] border border-dashed border-border px-[20px] py-[24px] text-center text-[13px] text-muted-foreground"
-              data-testid="home-my-apps-empty"
-            >
-              {t('poo205.myApps.empty')}
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 gap-[16px] min-[761px]:grid-cols-2 min-[1081px]:grid-cols-3">
-              {directory.myApps.map((entry) => {
-                const app = myAppForEntry(entry)
-                const publishing = app ? myApps.state.publishingAppIds.has(app.appId) : false
-                const withdrawing = app ? myApps.state.withdrawingAppIds.has(app.appId) : false
-                const published = Boolean(app?.publishedEntryId)
-                const sourceLost = hasOnlyLostCircleSources(entry)
-                return (
-                  <div key={entry.identityKey} className="group relative">
-                    <article
-                      data-testid="home-myapp-card"
-                      data-identity-key={entry.identityKey}
-                      aria-busy={publishing || withdrawing || Boolean(memberActions.operationStates[entry.identityKey]) || undefined}
-                      className="flex min-h-[210px] min-[1081px]:min-h-[222px] flex-col rounded-[20px] border border-border bg-surface client-material-card p-[18px] shadow-xs transition-[transform,border-color,box-shadow] duration-200 hover:-translate-y-[1px] hover:border-foreground-20 hover:shadow-middle min-[1081px]:p-[20px]"
-                    >
-                      <div className="mb-[18px] flex items-start justify-between gap-[8px]">
-                        <span className="grid size-[42px] flex-none place-items-center overflow-hidden rounded-[13px] bg-[var(--accent-soft)] text-accent">
-                          {entry.app.iconUrl
-                            ? <img src={entry.app.iconUrl} alt="" className="size-full object-cover" />
-                            : <span className="text-[17px] font-semibold">{entry.app.name.slice(0, 1)}</span>}
-                        </span>
-                        {app && (
-                          <span
-                            data-testid={`home-myapp-badge-${entry.identityKey}`}
-                            className={
-                              published
-                                ? 'inline-flex shrink-0 items-center whitespace-nowrap rounded-full bg-success/10 px-[8px] py-[1px] text-[11px] font-semibold leading-[1.6] text-success'
-                                : 'inline-flex shrink-0 items-center whitespace-nowrap rounded-full bg-foreground-5 px-[8px] py-[1px] text-[11px] font-semibold leading-[1.6] text-muted-foreground'
-                            }
-                          >
-                            {published
-                              ? t('poo205.myApps.badge.published')
-                              : t('poo205.myApps.badge.unpublished')}
-                          </span>
-                        )}
-                      </div>
-                      <h3 className="m-0 text-[16px] font-bold leading-[normal]">{entry.app.name}</h3>
-                      <p className="mt-[17px] text-[14px] leading-[1.6] text-muted-foreground">
-                        {entry.app.description || t('homeApps.noDescription')}
-                      </p>
-                      {entry.launchBlocked && (
-                        <p className="m-0 mt-[6px] text-[13px] leading-[1.5] text-muted-foreground">
-                          {sourceLost
-                            ? t('poo70.h3.home.sourceLostReason')
-                            : t('homeApps.errors.unavailable')}
-                        </p>
-                      )}
-                      <div className="mt-auto flex items-center justify-end gap-[7px] pt-[14px]">
-                        {/* Publish (enterprise only) / withdraw — the explicit
-                        shared-directory actions over myapps:publish /
-                        myapps:withdraw. A personal space never renders the
-                        publish entry; an uncorrelated app renders neither. */}
-                        {myApps.canPublish && app && !published && (
-                          <button
-                            type="button"
-                            data-testid={`home-myapp-publish-${entry.identityKey}`}
-                            disabled={publishing}
-                            className="inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[13px] font-medium text-foreground hover:bg-foreground-5 disabled:opacity-60"
-                            onClick={() => { void handlePublishMyApp(entry) }}
-                          >
-                            {publishing
-                              ? t('poo205.myApps.publishingAction')
-                              : t('poo205.myApps.publishAction')}
-                          </button>
-                        )}
-                        {app && published && (
-                          <button
-                            type="button"
-                            data-testid={`home-myapp-withdraw-${entry.identityKey}`}
-                            disabled={withdrawing}
-                            className="inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[13px] font-medium text-foreground hover:bg-foreground-5 disabled:opacity-60"
-                            onClick={() => { void handleWithdrawMyApp(entry) }}
-                          >
-                            {withdrawing
-                              ? t('poo205.myApps.withdrawingAction')
-                              : t('poo205.myApps.withdrawAction')}
-                          </button>
-                        )}
-                        {/* Open through the SAME trusted flow as the shared
-                        grid (fresh resolve-launch grant; cached rows never
-                        launch). */}
-                        <button
-                          type="button"
-                          data-testid={`home-myapp-open-${entry.identityKey}`}
-                          disabled={entry.launchBlocked
-                            || Boolean(memberActions.operationStates[entry.identityKey])}
-                          className="inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border border-accent bg-accent px-[12px] text-[13px] font-semibold text-white shadow-minimal transition-[box-shadow,transform] duration-200 hover:-translate-y-[1px] hover:shadow-middle disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0 disabled:hover:shadow-none"
-                          onClick={() => handleOpenApp(entry)}
-                        >
-                          {memberActions.operationStates[entry.identityKey]
-                            ? t('common.loading')
-                            : t('common.open')}
-                        </button>
-                      </div>
-                    </article>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </section>
       )}
 
       <section>
@@ -1563,9 +1450,14 @@ export function HomePage({ onEnterProject }: {
           </div>
         )}
         {directoryEmpty && !directoryRejected && catalog.productSpace && (
-          /* Honest vacuum (P70-HOME-03): personal spaces invite the circles
-          join path, enterprise spaces say plainly that nothing has been
-          distributed yet — never a generic "no results". */
+          /* Honest vacuum (P70-HOME-03) + C11 (R15) merged vacuum: personal
+          spaces invite the circles join path, enterprise spaces say plainly
+          that nothing has been distributed yet — never a generic "no
+          results". With BOTH partitions verifiably empty this is the page's
+          ONE empty state and the hint speaks for both (saved AND shared
+          apps); the enterprise/personal faces keep their distinct guidance.
+          A 我的应用 partition still loading/failed never merges — its own
+          face renders in its section instead. */
           <div
             className="mt-[16px] grid justify-items-center gap-[10px] rounded-[20px] border border-dashed border-border px-[20px] py-[34px] text-center"
             data-testid={spaceKind === 'enterprise'
@@ -1578,7 +1470,9 @@ export function HomePage({ onEnterProject }: {
                   {t('homeApps.allApps.empty')}
                 </h2>
                 <p className="m-0 max-w-[460px] text-[14px] leading-[1.5] text-muted-foreground">
-                  {t('poo70.h3.home.emptyEnterprise')}
+                  {bothPartitionsEmpty
+                    ? t('home.appsSection.emptyMergedEnterprise')
+                    : t('poo70.h3.home.emptyEnterprise')}
                 </p>
               </>
             ) : (
@@ -1590,7 +1484,9 @@ export function HomePage({ onEnterProject }: {
                   {t('poo70.h3.home.emptyPersonalTitle')}
                 </h2>
                 <p className="m-0 max-w-[460px] text-[14px] leading-[1.5] text-muted-foreground">
-                  {t('poo70.h3.home.emptyPersonalHint')}
+                  {bothPartitionsEmpty
+                    ? t('home.appsSection.emptyMergedPersonal')
+                    : t('poo70.h3.home.emptyPersonalHint')}
                 </p>
               </>
             )}
@@ -1640,6 +1536,173 @@ export function HomePage({ onEnterProject }: {
           </div>
         )}
       </section>
+
+      {/* POO-205 (Q7/Q11) 「我的应用」分区 — AFTER the shared directory
+      (C11/R15 IA order): the partition sits AFTER the shared app grid so
+      the toolbar-filtered grid stays adjacent to its toolbar in one
+      segment. The member's own saved canvas apps of THIS space, each with
+      the open action and (enterprise spaces only) the explicit publish /
+      withdraw actions. The partition carries its own title, vacuum and
+      failure faces; a personal space renders the same partition WITHOUT
+      the publish entry. */}
+      {catalog.productSpace && (
+        <section className="mb-[36px]" data-testid="home-my-apps">
+          <div className="mb-[16px] flex flex-wrap items-center justify-between gap-[12px]">
+            <div className="flex min-w-0 items-center gap-[10px]">
+              <h2
+                className="m-0 text-[20px] font-[720] tracking-[-0.03em]"
+                data-testid="home-my-apps-title"
+              >
+                {t('poo205.myApps.title')}
+              </h2>
+              <span className="inline-flex min-h-[20px] items-center rounded-full bg-foreground-5 px-[8px] text-[12px] font-medium text-muted-foreground">
+                {myApps.state.apps.length}
+              </span>
+            </div>
+            <p className="m-0 min-w-0 flex-1 text-[13px] leading-[1.5] text-foreground-60">
+              {t('poo205.myApps.subtitle')}
+            </p>
+          </div>
+          {myApps.state.loading ? (
+            <div
+              className="flex min-h-[120px] items-center justify-center rounded-[20px] border border-foreground/10 bg-surface client-material-card"
+              data-testid="home-my-apps-loading"
+            >
+              <Icons.LoaderCircle className="size-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : myApps.state.errorCode ? (
+            <div
+              className="grid justify-items-center gap-[8px] rounded-[20px] border border-dashed border-border px-[20px] py-[24px] text-center"
+              data-testid="home-my-apps-error"
+            >
+              <Icons.CloudOff className="size-[18px] text-muted-foreground" aria-hidden="true" />
+              <p className="m-0 text-[13px] text-muted-foreground">
+                {t('poo205.myApps.loadFailed')}
+              </p>
+              <button
+                type="button"
+                data-testid="home-my-apps-retry"
+                className="inline-flex min-h-[28px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[10px] text-[12px] font-medium text-foreground hover:bg-foreground-5"
+                onClick={() => { void myApps.refresh() }}
+              >
+                {t('homeApps.actions.tryAgain')}
+              </button>
+            </div>
+          ) : directory.myApps.length === 0 && !bothPartitionsEmpty ? (
+            /* C11 (R15): this own vacuum only renders when the shared
+            directory still has rows — with BOTH partitions empty the page's
+            single merged empty state (in the shared-grid section above)
+            speaks for both, so the partition keeps just its header row. */
+            <div
+              className="rounded-[20px] border border-dashed border-border px-[20px] py-[24px] text-center text-[13px] text-muted-foreground"
+              data-testid="home-my-apps-empty"
+            >
+              {t('poo205.myApps.empty')}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-[16px] min-[761px]:grid-cols-2 min-[1081px]:grid-cols-3">
+              {directory.myApps.map((entry) => {
+                const app = myAppForEntry(entry)
+                const publishing = app ? myApps.state.publishingAppIds.has(app.appId) : false
+                const withdrawing = app ? myApps.state.withdrawingAppIds.has(app.appId) : false
+                const published = Boolean(app?.publishedEntryId)
+                const sourceLost = hasOnlyLostCircleSources(entry)
+                return (
+                  <div key={entry.identityKey} className="group relative">
+                    <article
+                      data-testid="home-myapp-card"
+                      data-identity-key={entry.identityKey}
+                      aria-busy={publishing || withdrawing || Boolean(memberActions.operationStates[entry.identityKey]) || undefined}
+                      className="flex min-h-[210px] min-[1081px]:min-h-[222px] flex-col rounded-[20px] border border-border bg-surface client-material-card p-[18px] shadow-xs transition-[transform,border-color,box-shadow] duration-200 hover:-translate-y-[1px] hover:border-foreground-20 hover:shadow-middle min-[1081px]:p-[20px]"
+                    >
+                      <div className="mb-[18px] flex items-start justify-between gap-[8px]">
+                        <span className="grid size-[42px] flex-none place-items-center overflow-hidden rounded-[13px] bg-[var(--accent-soft)] text-accent">
+                          {entry.app.iconUrl
+                            ? <img src={entry.app.iconUrl} alt="" className="size-full object-cover" />
+                            : <span className="text-[17px] font-semibold">{entry.app.name.slice(0, 1)}</span>}
+                        </span>
+                        {app && (
+                          <span
+                            data-testid={`home-myapp-badge-${entry.identityKey}`}
+                            className={
+                              published
+                                ? 'inline-flex shrink-0 items-center whitespace-nowrap rounded-full bg-success/10 px-[8px] py-[1px] text-[11px] font-semibold leading-[1.6] text-success'
+                                : 'inline-flex shrink-0 items-center whitespace-nowrap rounded-full bg-foreground-5 px-[8px] py-[1px] text-[11px] font-semibold leading-[1.6] text-muted-foreground'
+                            }
+                          >
+                            {published
+                              ? t('poo205.myApps.badge.published')
+                              : t('poo205.myApps.badge.unpublished')}
+                          </span>
+                        )}
+                      </div>
+                      <h3 className="m-0 text-[16px] font-bold leading-[normal]">{entry.app.name}</h3>
+                      <p className="mt-[17px] text-[14px] leading-[1.6] text-muted-foreground">
+                        {entry.app.description || t('homeApps.noDescription')}
+                      </p>
+                      {entry.launchBlocked && (
+                        <p className="m-0 mt-[6px] text-[13px] leading-[1.5] text-muted-foreground">
+                          {sourceLost
+                            ? t('poo70.h3.home.sourceLostReason')
+                            : t('homeApps.errors.unavailable')}
+                        </p>
+                      )}
+                      <div className="mt-auto flex items-center justify-end gap-[7px] pt-[14px]">
+                        {/* Publish (enterprise only) / withdraw — the explicit
+                        shared-directory actions over myapps:publish /
+                        myapps:withdraw. A personal space never renders the
+                        publish entry; an uncorrelated app renders neither. */}
+                        {myApps.canPublish && app && !published && (
+                          <button
+                            type="button"
+                            data-testid={`home-myapp-publish-${entry.identityKey}`}
+                            disabled={publishing}
+                            className="inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[13px] font-medium text-foreground hover:bg-foreground-5 disabled:opacity-60"
+                            onClick={() => { void handlePublishMyApp(entry) }}
+                          >
+                            {publishing
+                              ? t('poo205.myApps.publishingAction')
+                              : t('poo205.myApps.publishAction')}
+                          </button>
+                        )}
+                        {app && published && (
+                          <button
+                            type="button"
+                            data-testid={`home-myapp-withdraw-${entry.identityKey}`}
+                            disabled={withdrawing}
+                            className="inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[13px] font-medium text-foreground hover:bg-foreground-5 disabled:opacity-60"
+                            onClick={() => { void handleWithdrawMyApp(entry) }}
+                          >
+                            {withdrawing
+                              ? t('poo205.myApps.withdrawingAction')
+                              : t('poo205.myApps.withdrawAction')}
+                          </button>
+                        )}
+                        {/* Open through the SAME trusted flow as the shared
+                        grid (fresh resolve-launch grant; cached rows never
+                        launch). */}
+                        <button
+                          type="button"
+                          data-testid={`home-myapp-open-${entry.identityKey}`}
+                          disabled={entry.launchBlocked
+                            || Boolean(memberActions.operationStates[entry.identityKey])}
+                          className="inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border border-accent bg-accent px-[12px] text-[13px] font-semibold text-white shadow-minimal transition-[box-shadow,transform] duration-200 hover:-translate-y-[1px] hover:shadow-middle disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0 disabled:hover:shadow-none"
+                          onClick={() => handleOpenApp(entry)}
+                        >
+                          {memberActions.operationStates[entry.identityKey]
+                            ? t('common.loading')
+                            : t('common.open')}
+                        </button>
+                      </div>
+                    </article>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </section>
+      )}
+
       {catalog.productSpace && spaceKind === 'personal' && showCirclesCard && (
         <HomeSpaceContext
           spaceName={activeProductSpace?.name
@@ -1767,6 +1830,13 @@ export function HomePage({ onEnterProject }: {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* C11 (R16): the manage-skills dialog — its FIRST production mount
+      (the former assistant card retired). Own close state; the dialog reads
+      the committed space through the shared ProductSpace context. */}
+      {skillsDialogOpen && (
+        <ProductSpaceSkillsDialog onClose={() => setSkillsDialogOpen(false)} />
+      )}
 
     </main>
     </div>
