@@ -43,6 +43,16 @@ export interface SessionStorage {
   readonly persistenceQueue: SessionPersistenceQueue
   getSessionsRoot(workspaceRootPath: string): string
   getSessionPath(workspaceRootPath: string, sessionId: string): string
+  /**
+   * POO-205 C5: EVERY directory a session id could legitimately live in
+   * under the workspace — the legacy root plus every project store. Pure
+   * computation (no fs probing, no probe cache): consumers use it as the
+   * set of storage-derivable answers for a managed path, so a fabricated
+   * path outside this set is rejected and a project session's real path is
+   * accepted. Workspace-rooted storages list the project stores; the CLI
+   * rooted storage has exactly its own root.
+   */
+  listSessionDirCandidates(workspaceRootPath: string, sessionId: string): string[]
   getSessionFilePath(workspaceRootPath: string, sessionId: string): string
   getAttachmentsPath(workspaceRootPath: string, sessionId: string): string
   getPlansPath(workspaceRootPath: string, sessionId: string): string
@@ -155,6 +165,14 @@ abstract class FilesystemSessionStorage implements SessionStorage {
     return join(this.getSessionsRoot(workspaceRootPath), sanitizeSessionId(sessionId))
   }
 
+  /**
+   * POO-205 C5 default: the legacy root candidate only. Workspace-rooted
+   * storages override this to also list every project store.
+   */
+  listSessionDirCandidates(workspaceRootPath: string, sessionId: string): string[] {
+    return [this.getSessionPath(workspaceRootPath, sessionId)]
+  }
+
   getSessionFilePath(workspaceRootPath: string, sessionId: string): string {
     return join(this.getSessionPath(workspaceRootPath, sessionId), 'session.jsonl')
   }
@@ -246,6 +264,21 @@ export class WorkspaceSessionStorage extends FilesystemSessionStorage {
 
   ensureSessionsRoot(workspaceRootPath: string): string {
     return ensureDirectory(this.getSessionsRoot(workspaceRootPath))
+  }
+
+  /**
+   * POO-205 C5: legacy root first, then every existing project store. Pure
+   * layout computation — the returned directories may not exist on disk
+   * (fresh sessions), which is exactly why this is a candidate set instead
+   * of a single probed answer.
+   */
+  listSessionDirCandidates(workspaceRootPath: string, sessionId: string): string[] {
+    const safeId = sanitizeSessionId(sessionId)
+    const candidates = [join(this.getSessionsRoot(workspaceRootPath), safeId)]
+    for (const projectRoot of listProjectSessionStoreRoots(workspaceRootPath)) {
+      candidates.push(join(projectRoot, 'sessions', safeId))
+    }
+    return candidates
   }
 }
 

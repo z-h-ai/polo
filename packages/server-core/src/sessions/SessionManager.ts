@@ -115,6 +115,7 @@ import {
   listProjectSessionStoreRoots,
   type SessionStorage,
 } from '@polo-ai/shared/sessions'
+import { relocateProjectSessionArtifacts } from './session-store-relocation'
 import { loadWorkspaceSources, loadAllSources, getSourcesBySlugs, isSourceUsable, type LoadedSource, type McpServerConfig, getSourcesNeedingAuth, getSourceCredentialManager, getSourceServerBuilder, type SourceWithCredential, isApiOAuthProvider, hasRenewEndpoint, SERVER_BUILD_ERRORS, TokenRefreshManager, createTokenGetter } from '@polo-ai/shared/sources'
 import { ConfigWatcher, type ConfigWatcherCallbacks } from '@polo-ai/shared/config'
 import { getValidClaudeOAuthToken } from '@polo-ai/shared/auth'
@@ -1029,6 +1030,12 @@ interface ManagedSession {
   backgroundTaskOutputs: Map<string, { outputFile: string; summary: string; status: string; completedAt: number }>
   // Whether messages have been loaded from disk (for lazy loading)
   messagesLoaded: boolean
+  // POO-205 C5 (X2): a session.jsonl EXISTS on disk but could not be loaded
+  // into memory. While set, persistence is refused outright — hydrating an
+  // empty in-memory history over the unreadable file would destroy it — and
+  // sendMessage rejects with SESSION_CONTENT_UNAVAILABLE until a reload
+  // succeeds (which clears the flag).
+  messagesLoadFailed?: boolean
   // Pending auth request tracking (for unified auth flow)
   pendingAuthRequestId?: string
   pendingAuthRequest?: AuthRequest
@@ -3440,18 +3447,40 @@ export class SessionManager implements ISessionManager {
       // Iterate over each workspace and load its sessions
       for (const workspace of workspaces) {
         const workspaceRootPath = workspace.rootPath
+        // POO-205 C5: one-time, idempotent relocation of the pre-unification
+        // strayed artifacts (legacy-root runtime dirs of project sessions)
+        // into their project stores — BEFORE listing, so the load below and
+        // every downstream path see a single source of truth per session.
+        try {
+          const relocation = relocateProjectSessionArtifacts(workspaceRootPath, this.sessionStorage, sessionLog)
+          if (relocation.relocated > 0 || relocation.conflicts > 0) {
+            sessionLog.info(
+              `Relocated stray artifacts of ${relocation.relocated} project session(s) into their project stores (${relocation.conflicts} conflict(s) kept in the legacy root, ${relocation.alreadyFinished} already finished)`,
+            )
+          }
+        } catch (error) {
+          // Relocation is a best-effort cleanup: a failure must never block
+          // session loading (the dedup below already prefers project stores).
+          sessionLog.warn('Project session artifact relocation failed; continuing with load', error)
+        }
         // POO-205 (G4): sessions live in the legacy root AND in per-project
         // stores — aggregate both, deduped by id (a session exists in exactly
         // one store; the guard is belt-and-braces for a crashed migration).
+        // POO-205 C5 (P3-4): the PROJECT stores win the dedup — a same-id
+        // directory left in the legacy root is a stale pre-bf5344d3 copy
+        // whose metadata must never beat the authoritative project record.
         const sessionMetadata = [
-          ...this.sessionStorage.list(workspaceRootPath),
           ...listProjectSessionStoreRoots(workspaceRootPath).flatMap(root =>
             this.sessionStorage.list(root),
           ),
+          ...this.sessionStorage.list(workspaceRootPath),
         ]
         const seenIds = new Set<string>()
         const dedupedMetadata = sessionMetadata.filter(meta => {
-          if (seenIds.has(meta.id)) return false
+          if (seenIds.has(meta.id)) {
+            sessionLog.warn(`Session ${meta.id} exists in BOTH a project store and the legacy root — the project store's record wins; the legacy copy is stale`)
+            return false
+          }
           seenIds.add(meta.id)
           return true
         })
@@ -3549,6 +3578,12 @@ export class SessionManager implements ISessionManager {
     if (!managed.messagesLoaded) {
       this.hydrateMessagesForColdPersist(managed)
     }
+    // X2: the on-disk record exists but never loaded — persisting the
+    // in-memory (empty) snapshot would overwrite real history with a stub.
+    if (managed.messagesLoadFailed) {
+      sessionLog.error(`Refusing to persist session ${managed.id}: its session.jsonl exists but is unreadable — a write here would overwrite the history with an empty snapshot`)
+      return
+    }
     this.enqueuePersist(managed, stagedOverrides)
   }
 
@@ -3560,6 +3595,15 @@ export class SessionManager implements ISessionManager {
   private hydrateMessagesForColdPersist(managed: ManagedSession): void {
     sessionLog.debug(`Cold-load triggered for persistSession on ${managed.id}`)
     const stored = this.sessionStorage.load(this.storeRootForManaged(managed), managed.id)
+    if (!stored && this.hasPersistedSessionFile(managed)) {
+      // X2: same distinction as loadMessagesFromDisk — the file exists but
+      // is unreadable. Leave messagesLoaded false so persistSession's guard
+      // below refuses the write, and stay failed until a real load succeeds.
+      managed.messagesLoadFailed = true
+      sessionLog.error(`Cold-persist hydration failed for session ${managed.id}: session.jsonl exists but could not be read — persistSession will refuse the write`)
+      return
+    }
+    managed.messagesLoadFailed = false
     if (stored) {
       managed.messages = (stored.messages || []).map(storedToMessage)
       managed.tokenUsage = stored.tokenUsage
@@ -4066,10 +4110,33 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
+   * POO-205 C5 (X2): does the session have a persisted record on disk in its
+   * own store? Distinguishes a genuinely fresh session (no file — an empty
+   * history is correct) from one whose file EXISTS but failed to load
+   * (unreadable/corrupt — an empty in-memory history is a lie, and persisting
+   * it would overwrite the real one).
+   */
+  private hasPersistedSessionFile(managed: ManagedSession): boolean {
+    return existsSync(this.sessionStorage.getSessionFilePath(this.storeRootForManaged(managed), managed.id))
+  }
+
+  /**
    * Internal: Load messages from disk storage into the managed session.
    */
   private async loadMessagesFromDisk(managed: ManagedSession): Promise<void> {
     const storedSession = this.sessionStorage.load(this.storeRootForManaged(managed), managed.id)
+    if (!storedSession && this.hasPersistedSessionFile(managed)) {
+      // X2: the record exists but could not be read. Leave messagesLoaded
+      // false (a retry re-runs this loader) and raise a coded error so
+      // callers — sendMessage above all — refuse instead of treating the
+      // session as an empty new one and persisting over the file.
+      managed.messagesLoadFailed = true
+      sessionLog.error(`Session ${managed.id} has a session.jsonl on disk that failed to load — refusing to treat it as empty history`)
+      throw Object.assign(new Error('SESSION_CONTENT_UNAVAILABLE: the session content on disk could not be loaded'), {
+        code: 'SESSION_CONTENT_UNAVAILABLE' as const,
+      })
+    }
+    managed.messagesLoadFailed = false
     if (storedSession) {
       managed.messages = (storedSession.messages || []).map(storedToMessage)
       managed.tokenUsage = storedSession.tokenUsage
@@ -4183,9 +4250,51 @@ export class SessionManager implements ISessionManager {
       : managed.workspace.rootPath
   }
 
+  /**
+   * POO-205 C5 (P1-2): THE single resolution of a session's actual directory.
+   * Every session-scoped artifact site (agent transcripts, plans, data,
+   * downloads, error logs, browser audit, share/export reads, deletion) MUST
+   * resolve through this — never `getSessionPath(managed.workspace.rootPath,
+   * id)`, which points project sessions at the legacy root where their
+   * artifacts silently strand (delete → resurrect, share → file-not-found,
+   * Pi branch → missing parent transcript).
+   */
+  private sessionDirFor(managed: ManagedSession): string {
+    return this.sessionStorage.getSessionPath(this.storeRootForManaged(managed), managed.id)
+  }
+
   /** Store-root resolution for a session addressed only by id (probe). */
   private storeRootForId(workspaceRootPath: string, sessionId: string): string {
     return probeSessionStoreRoot(workspaceRootPath, sessionId)?.storeRoot ?? workspaceRootPath
+  }
+
+  /**
+   * POO-205 C5 (P1-1): delete a session's directory in its ACTUAL store, and
+   * for a PROJECT session also remove the companion directory a pre-C5 build
+   * may have stranded in the legacy root (`{ws}/sessions/{id}` — agent
+   * transcripts, plans, data…). Without this the session resurrects on
+   * restart: the project record is gone but loadSessionsFromDisk still
+   * aggregates the legacy root.
+   * - Companion WITHOUT a session.jsonl: pure runtime artifacts of a
+   *   bf5344d3-era build — removed outright (info log).
+   * - Companion WITH a session.jsonl: a stale pre-bf5344d3 COPY of the
+   *   session (its authoritative record lives in the project store) — also
+   *   removed, with a louder log since real transcript bytes are going away.
+   */
+  private deleteSessionStores(managed: ManagedSession): void {
+    this.sessionStorage.delete(this.storeRootForManaged(managed), managed.id)
+    if (!managed.projectId) return
+    const legacyDir = this.sessionStorage.getSessionPath(managed.workspace.rootPath, managed.id)
+    if (!existsSync(legacyDir)) return
+    const hasStaleTranscript = existsSync(join(legacyDir, 'session.jsonl'))
+    try {
+      this.sessionStorage.delete(managed.workspace.rootPath, managed.id)
+      sessionLog.info(
+        `Removed legacy-root companion directory for project session ${managed.id}${hasStaleTranscript ? ' (contained a STALE pre-project-store copy of session.jsonl — the authoritative record in the project store is untouched)' : ' (runtime artifacts only)'}`,
+      )
+    } catch (error) {
+      sessionLog.warn(`Failed to remove legacy-root companion directory for project session ${managed.id}:`, error)
+    }
   }
 
   getSessionsRoot(workspaceId: string): string | null {
@@ -4992,12 +5101,9 @@ export class SessionManager implements ISessionManager {
         const storageOwnershipProbe = this.sessions.get(owner.sessionId)
         if (storageOwnershipProbe === undefined || storageOwnershipProbe === owner.managed) {
           try {
-            const deleted = this.sessionStorage.delete(managed.workspace.rootPath, owner.sessionId)
-            if (deleted === false) {
-              push('storage', 'failed', 'storage delete returned false')
-            } else {
-              push('storage', 'cleaned')
-            }
+            // POO-205 C5: the ACTUAL store + legacy companion (project sessions).
+            this.deleteSessionStores(managed)
+            push('storage', 'cleaned')
           } catch (storageError) {
             push('storage', 'failed', storageError instanceof Error ? storageError.message : String(storageError))
           }
@@ -5573,8 +5679,8 @@ export class SessionManager implements ISessionManager {
       sessionLog.info(`Quarantined unpublished runtime ${sessionId}: live replacement owns the id — storage/registrations preserved`)
     } else {
       try {
-        const deleted = this.sessionStorage.delete(entry.managed.workspace.rootPath, sessionId)
-        if (deleted === false) cleanupFailure = 'storage delete returned false'
+        // POO-205 C5: the ACTUAL store + legacy companion (project sessions).
+        this.deleteSessionStores(entry.managed)
       } catch (storageError) {
         cleanupFailure = storageError instanceof Error ? storageError.message : String(storageError)
       }
@@ -5990,7 +6096,9 @@ export class SessionManager implements ISessionManager {
 
       // Set the exact instance-resolved directory for cross-process metadata.
       // Main-process adapters use explicit per-session lookups.
-      const sessionDirForMetadata = this.sessionStorage.getSessionPath(managed.workspace.rootPath, managed.id)
+      // POO-205 C5: the session's ACTUAL store directory (project store for
+      // project sessions) — also sent to the backend as sessionDir below.
+      const sessionDirForMetadata = this.sessionDirFor(managed)
 
       // Set up agentReady promise so title generation can await agent creation
       managed.agentReady = new Promise<void>(r => { managed.agentReadyResolve = r })
@@ -5999,7 +6107,7 @@ export class SessionManager implements ISessionManager {
       // Common setup: sources, MCP pool, session config
       // ============================================================
 
-      const sessionPath = this.sessionStorage.getSessionPath(managed.workspace.rootPath, managed.id)
+      const sessionPath = this.sessionDirFor(managed)
       const enabledSlugs = this.cliAuthority?.desktopManaged ? [] : managed.enabledSourceSlugs || []
       const allSources = this.cliAuthority?.desktopManaged ? [] : loadAllSources(managed.workspace.rootPath)
       const enabledSources = allSources.filter(s =>
@@ -6238,6 +6346,11 @@ export class SessionManager implements ISessionManager {
           finish: async (turnId: string) => { await canonicalSkillTurns.finish(turnId) },
         },
         sessionStorage: this.sessionStorage,
+        // POO-205 C5 (P1-2): the backend's session-scoped artifact paths (Pi
+        // transcripts/.pi-agent, plans, data, screenshots, call_llm spill)
+        // resolve through THIS directory — the session's actual store. For a
+        // project session that is the project store, never the legacy root.
+        sessionDir: sessionDirForMetadata,
         miniModel,
         thinkingLevel: managed.thinkingLevel,
         session: sessionConfig,
@@ -6525,7 +6638,7 @@ export class SessionManager implements ISessionManager {
         const presentations = new Map<string, BrowserActionConfirmation>()
         const authorization = new BrowserActionAuthorization({
           scope: browserScope, assertCurrent: assertBrowserScope,
-          audit: event => appendBrowserActionAudit(this.sessionStorage.getSessionPath(managed.workspace.rootPath,sid),event),
+          audit: event => appendBrowserActionAudit(this.sessionDirFor(managed),event),
           policy: async scope => readBrowserPolicy({accountId:scope.accountId,productSpaceId:scope.productSpaceId,adminOrigin:scope.adminOrigin!}),
           facts: async parts => {
             if (!bpm.inspectBrowserAction) throw new Error('Browser execution authority requires an updated desktop')
@@ -7419,7 +7532,9 @@ export class SessionManager implements ISessionManager {
           if (!this.managedScopeTarget(subscriber, subscriber.id)) return false
           if (subscriber.isProcessing || subscriber.turnStartReserved || subscriber.questionLifecycleTombstone) return false
           if (!subscriber.messagesLoaded) {
-            const stored = this.sessionStorage.load(workspaceRootPath, subscriber.id)
+            // POO-205 C5: a project session's transcript lives in its project
+            // store — the cold recovery read must resolve the actual root.
+            const stored = this.sessionStorage.load(this.storeRootForManaged(subscriber), subscriber.id)
             if (!stored?.messages.some(m => m.type === 'user' && m.isQueued && m.content.startsWith('[Task event]'))) return true
             // Hydration schedules the existing queue replay path; no LLM polling.
             this.hydrateMessagesForColdPersist(subscriber)
@@ -7759,7 +7874,10 @@ export class SessionManager implements ISessionManager {
 
     try {
       // Load session directly from disk (already in correct format)
-      const storedSession = this.sessionStorage.load(managed.workspace.rootPath, sessionId)
+      // POO-205 C5: read from the session's ACTUAL store (project store for
+      // project sessions) — the legacy-root read was a guaranteed
+      // "Session file not found" for them.
+      const storedSession = this.sessionStorage.load(this.storeRootForManaged(managed), sessionId)
       if (!storedSession) {
         return { success: false, error: 'Session file not found' }
       }
@@ -7790,8 +7908,7 @@ export class SessionManager implements ISessionManager {
       managed.sharedUrl = data.url
       managed.sharedId = data.id
       managed.sharedWriteToken = data.writeToken
-      const workspaceRootPath = managed.workspace.rootPath
-      await updateSessionMetadata(workspaceRootPath, sessionId, {
+      await updateSessionMetadata(this.storeRootForManaged(managed), sessionId, {
         sharedUrl: data.url,
         sharedId: data.id,
         sharedWriteToken: data.writeToken,
@@ -7830,7 +7947,8 @@ export class SessionManager implements ISessionManager {
 
     try {
       // Load session directly from disk (already in correct format)
-      const storedSession = this.sessionStorage.load(managed.workspace.rootPath, sessionId)
+      // POO-205 C5: same actual-store resolution as shareSession.
+      const storedSession = this.sessionStorage.load(this.storeRootForManaged(managed), sessionId)
       if (!storedSession) {
         return { success: false, error: 'Session file not found' }
       }
@@ -7959,7 +8077,8 @@ export class SessionManager implements ISessionManager {
     if (managed.agent) {
       const sources = getSourcesBySlugs(workspaceRootPath, sourceSlugs)
       // Pass session path so large API responses can be saved to session folder
-      const sessionPath = this.sessionStorage.getSessionPath(workspaceRootPath, sessionId)
+      // POO-205 C5: the session's ACTUAL store directory.
+      const sessionPath = this.sessionDirFor(managed)
       const { mcpServers, apiServers, errors } = await buildServersFromSources(sources, sessionPath, managed.tokenRefreshManager, managed.agent.getSummarizeCallback())
       if (errors.length > 0) {
         sessionLog.warn(`Source build errors:`, errors)
@@ -8766,8 +8885,9 @@ export class SessionManager implements ISessionManager {
       automationSystem.removeSessionMetadata(sessionId)
     }
 
-    // Delete from disk too
-    this.sessionStorage.delete(workspaceRootPath, sessionId)
+    // Delete from disk too — POO-205 C5: the session's ACTUAL store, plus a
+    // project session's legacy-root companion directory.
+    this.deleteSessionStores(managed)
 
     // Notify all windows for this workspace that the session was deleted.
     // The record left the map in the locked declaration, so the boundary
@@ -9631,7 +9751,8 @@ export class SessionManager implements ISessionManager {
 
       // Apply source servers if any are enabled
       if (hasSources) {
-        const sessionPath = this.sessionStorage.getSessionPath(workspaceRootPath, sessionId)
+        // POO-205 C5: the session's ACTUAL store directory.
+        const sessionPath = this.sessionDirFor(managed)
         // Single fresh build — tokens already refreshed above.
         const { mcpServers, apiServers, errors } = await buildServersFromSources(sources, sessionPath, managed.tokenRefreshManager, agent.getSummarizeCallback())
         if (errors.length > 0) {
@@ -9885,7 +10006,8 @@ export class SessionManager implements ISessionManager {
             // Check if there's a captured API error that explains the silent failure.
             // Pass explicit session path to avoid reading from the wrong session
             // (_sessionDir singleton can be clobbered by concurrent sessions).
-            const sessionErrorPath = this.sessionStorage.getSessionPath(managed.workspace.rootPath, managed.id)
+            // POO-205 C5: the error log lives in the session's ACTUAL store.
+            const sessionErrorPath = this.sessionDirFor(managed)
             const apiError = getLastApiError(sessionErrorPath)
 
             if (apiError && apiError.status === 400) {
@@ -11254,7 +11376,15 @@ export class SessionManager implements ISessionManager {
     if (!workspace) return null
     let metas: SessionMetadata[] = []
     try {
-      metas = this.sessionStorage.list(workspace.rootPath)
+      // POO-205 C5: Popover pending-question cold scan must aggregate the
+      // project stores too — a project session's header is invisible to a
+      // legacy-root listing alone.
+      metas = [
+        ...this.sessionStorage.list(workspace.rootPath),
+        ...listProjectSessionStoreRoots(workspace.rootPath).flatMap(root =>
+          this.sessionStorage.list(root),
+        ),
+      ]
     } catch (error) {
       // TRANSIENT: an I/O failure here must NOT be
       // reported as an authoritative "no pending question" — that would let
@@ -13673,7 +13803,9 @@ export class SessionManager implements ISessionManager {
     this.persistSession(managed)
     await this.sessionStorage.flush(sessionId)
 
-    const bundle = serializeSession(managed.workspace.rootPath, sessionId, this.sessionStorage)
+    // POO-205 C5: serialize from the session's ACTUAL store — the export
+    // dispatch read the legacy root and failed for project sessions.
+    const bundle = serializeSession(this.storeRootForManaged(managed), sessionId, this.sessionStorage)
     if (!bundle) {
       sessionLog.error(`[dispatch] Failed to serialize session ${sessionId}`)
       return null

@@ -24,7 +24,7 @@ import { useAppShellContext, usePendingPermission, usePendingCredential, usePend
 import { rendererPerf } from '@/lib/perf'
 import { routes } from '@/lib/navigate'
 import { coerceInputText } from '@/lib/input-text'
-import { deriveSessionMessagesLoadState, formatSessionLoadFailure } from '@/lib/session-load'
+import { deriveSessionMessagesLoadState, formatSessionLoadFailure, isSessionSendBlockedByLoadState } from '@/lib/session-load'
 import { decideChatAccessBanner } from '@/lib/chat-access-banner'
 import { createCitationSourceOpener, type CitationSourceScope } from '@/lib/open-citation-source'
 import { formatQuotaResetTime } from '@/lib/quota-reset-time'
@@ -626,7 +626,21 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     [chatAccessStatus, canOpenPayment, productSpace?.activeProductSpace?.kind],
   )
 
+  const messagesLoadBlocked = isSessionSendBlockedByLoadState(messageLoadState)
+
   const inputStatusBanner = React.useMemo(() => {
+    // POO-205 C5 (X2): a session whose content never loaded must not accept
+    // sends — the server refuses them (SESSION_CONTENT_UNAVAILABLE) and the
+    // composer stays disabled until the retry below actually loads. This
+    // outranks the failed-send prompt (nothing can be sent to fail).
+    if (messagesLoadBlocked) {
+      return {
+        variant: 'destructive' as const,
+        message: t('chat.messagesLoadBlocked.message'),
+        actionLabel: t('chat.messagesLoadBlocked.retry'),
+        onAction: handleRetryMessagesLoad,
+      }
+    }
     // Journey #1 billing block wins: under a hard access block a draft
     // prompt would be noise — the banner owns the messaging and the input.
     if (bannerDecision) {
@@ -674,11 +688,12 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       }
     }
     return null
-  }, [bannerDecision, onRetryAiConfigSync, onRecheckBilling, billingRecheckPending, openPayment, t, sendFailure, handleRestoreSendFailureDraft, handleDiscardSendFailureDraft])
+  }, [bannerDecision, messagesLoadBlocked, handleRetryMessagesLoad, onRetryAiConfigSync, onRecheckBilling, billingRecheckPending, openPayment, t, sendFailure, handleRestoreSendFailureDraft, handleDiscardSendFailureDraft])
 
-  // Only the hard billing block disables the composer (review F4); the
-  // failed-send prompt is advisory.
-  const isChatInputDisabled = !!bannerDecision
+  // The hard billing block disables the composer (review F4); the
+  // failed-send prompt is advisory. POO-205 C5 (X2): so is an unloaded
+  // session — the server refuses those sends anyway.
+  const isChatInputDisabled = !!bannerDecision || messagesLoadBlocked
 
   // Effective model for this session (session-specific or global fallback)
   const effectiveModel = React.useMemo(() => {

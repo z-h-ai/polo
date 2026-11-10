@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import type { Session, TransportConnectionState } from '../../../shared/types'
-import { deriveSessionMessagesLoadState, formatSessionLoadFailure, shouldTreatSessionLoadFailureAsTransportFallback } from '../session-load'
+import { deriveSessionMessagesLoadState, formatSessionLoadFailure, isSessionSendBlockedByLoadState, shouldTreatSessionLoadFailureAsTransportFallback } from '../session-load'
 
 function createState(overrides?: Partial<TransportConnectionState>): TransportConnectionState {
   return {
@@ -130,6 +130,43 @@ describe('shouldTreatSessionLoadFailureAsTransportFallback', () => {
     expect(shouldTreatSessionLoadFailureAsTransportFallback(
       createState({ mode: 'local', status: 'failed' }),
     )).toBe(false)
+  })
+})
+
+// POO-205 C5 (X2): the composer send block is exactly "not ready AND an
+// error is showing" — a load still in flight must never block.
+describe('isSessionSendBlockedByLoadState', () => {
+  function loadState(overrides: Partial<Parameters<typeof deriveSessionMessagesLoadState>[0]> = {}) {
+    return deriveSessionMessagesLoadState({
+      session: null,
+      sessionMeta: null,
+      messagesLoaded: false,
+      ...overrides,
+    })
+  }
+
+  it('blocks when the load failed and nothing is ready', () => {
+    expect(isSessionSendBlockedByLoadState(loadState({ loadError: 'boom' }))).toBe(true)
+  })
+
+  it('does not block while the load is still in flight (no error yet)', () => {
+    expect(isSessionSendBlockedByLoadState(loadState())).toBe(false)
+  })
+
+  it('does not block once messages are ready, even with a stale error string', () => {
+    expect(isSessionSendBlockedByLoadState(loadState({
+      messagesLoaded: true,
+      session: { messages: [{ id: 'm1' }] } as Session,
+      loadError: 'stale',
+    }))).toBe(false)
+  })
+
+  it('does not block for a known-empty session with an error string', () => {
+    expect(isSessionSendBlockedByLoadState(loadState({
+      messagesLoaded: true,
+      session: { id: 's1', messages: [], messageCount: 0 } as unknown as Session,
+      loadError: 'stale',
+    }))).toBe(false)
   })
 })
 

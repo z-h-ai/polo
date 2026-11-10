@@ -340,6 +340,8 @@
   "chat.learnMore": "Dowiedz się więcej",
   "chat.loadConversationFailed": "Nie udało się wczytać rozmowy",
   "chat.mentionFilesSkillsSources": "Wspomnij pliki, umiejętności, źródła",
+  "chat.messagesLoadBlocked.message": "Zawartość sesji nie została wczytana — spróbuj ponownie przed wysłaniem",
+  "chat.messagesLoadBlocked.retry": "Ponów",
   "chat.messagesUnavailable": "Wiadomości sesji są niedostępne",
   "chat.modelPicker.adminConfigured": "Models are configured by your administrator.",
   "chat.modelPicker.contextSection": "Kontekst",

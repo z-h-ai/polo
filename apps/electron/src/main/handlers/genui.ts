@@ -101,6 +101,13 @@ export interface GenUiSessionManagerLike {
 export interface GenUiSessionStorageLike {
   getSessionPath(workspaceRootPath: string, sessionId: string): string
   getDataPath(workspaceRootPath: string, sessionId: string): string
+  /**
+   * POO-205 C5: every directory the session id could legitimately live in
+   * under the workspace — the legacy root plus every project store. Optional
+   * so dep-less test fakes and older hosts fall back to the single legacy
+   * derivation.
+   */
+  listSessionDirCandidates?(workspaceRootPath: string, sessionId: string): string[]
 }
 
 export interface GenUiDeps {
@@ -356,6 +363,45 @@ export function registerGenUiHandlers(server: RpcServer, deps: GenUiDeps = {}): 
 }
 
 /**
+ * POO-205 C5: every storage-derivable session directory under a workspace —
+ * the legacy root plus every project store. Falls back to the single legacy
+ * derivation when the candidate surface is absent (dep-less fakes, older
+ * hosts).
+ */
+function listStorageSessionDirCandidates(
+  storage: GenUiSessionStorageLike,
+  workspaceRootPath: string,
+  sessionId: string,
+): string[] {
+  return storage.listSessionDirCandidates?.(workspaceRootPath, sessionId)
+    ?? [storage.getSessionPath(workspaceRootPath, sessionId)]
+}
+
+/**
+ * The managed-vs-storage identity cross-check shared by all three trust
+ * gates: the SessionManager-derived session directory must be one of the
+ * storage-derivable candidates of a known workspace. POO-205 C5 — a project
+ * session's real directory (`project-sessions/<projectId>/sessions/<id>`)
+ * now matches; a fabricated path outside the candidate set is still
+ * rejected. The data dir is `data/` under the session dir, mirroring the
+ * storage implementations' own getDataPath composition.
+ */
+function resolveManagedStorageTwin(
+  sessionManager: GenUiSessionManagerLike,
+  storage: GenUiSessionStorageLike,
+  sessionId: string,
+  managedSessionPath: string,
+): { sessionPath: string; dataPath: string } | null {
+  for (const workspace of sessionManager.getWorkspaces()) {
+    for (const sessionPath of listStorageSessionDirCandidates(storage, workspace.rootPath, sessionId)) {
+      if (resolve(managedSessionPath) !== resolve(sessionPath)) continue
+      return { sessionPath, dataPath: join(sessionPath, 'data') }
+    }
+  }
+  return null
+}
+
+/**
  * The trust anchor shared by the pin audit and the publish packaging: the
  * calling window's Workspace mapping is the only anchor — a renderer cannot
  * name another workspace's session directory. SECURITY: sessionId is
@@ -379,11 +425,11 @@ export function resolveTrustedSessionContext(
   validateSessionId(sessionId)
   const managedSessionPath = sessionManager.getSessionPath(sessionId)
   if (!managedSessionPath) throw new Error(`Session not found: ${sessionId}`)
-  const sessionPath = storage.getSessionPath(workspace.rootPath, sessionId)
-  if (resolve(managedSessionPath) !== resolve(sessionPath)) {
+  const twin = resolveManagedStorageTwin(sessionManager, storage, sessionId, managedSessionPath)
+  if (!twin) {
     throw new Error(`Session storage identity mismatch: ${sessionId}`)
   }
-  return { sessionPath, dataPath: storage.getDataPath(workspace.rootPath, sessionId) }
+  return twin
 }
 
 /**
@@ -414,12 +460,7 @@ export function createSessionDataPathResolver(deps: GenUiDeps): (sessionId: stri
       validateSessionId(sessionId)
       const managedSessionPath = sessionManager.getSessionPath(sessionId)
       if (!managedSessionPath) return null
-      for (const workspace of sessionManager.getWorkspaces()) {
-        const storageSessionPath = storage.getSessionPath(workspace.rootPath, sessionId)
-        if (resolve(managedSessionPath) !== resolve(storageSessionPath)) continue
-        return storage.getDataPath(workspace.rootPath, sessionId)
-      }
-      return null
+      return resolveManagedStorageTwin(sessionManager, storage, sessionId, managedSessionPath)?.dataPath ?? null
     } catch {
       return null
     }
@@ -460,25 +501,22 @@ export function createGenUiGuestSrcValidator(deps: GenUiDeps): (sessionId: strin
         return false
       }
       // Shape gate first: .../genui-apps/<appId>/index.html with a
-      // generate_app-shaped appId. The workspace loop below then requires the
+      // generate_app-shaped appId. The twin lookup below then requires the
       // exact storage-derived twin of this path.
       const bundleMatch = /^(.+)[/]genui-apps[/]([A-Za-z0-9][A-Za-z0-9_-]*)[/]index\.html$/.exec(
         candidatePath.split(sep).join('/')
       )
       if (!bundleMatch) return false
 
-      for (const workspace of sessionManager.getWorkspaces()) {
-        const storageSessionPath = storage.getSessionPath(workspace.rootPath, sessionId)
-        if (resolve(managedSessionPath) !== resolve(storageSessionPath)) continue
-        const expectedIndexPath = resolve(
-          storage.getDataPath(workspace.rootPath, sessionId),
-          'genui-apps',
-          bundleMatch[2],
-          'index.html',
-        )
-        if (candidatePath === expectedIndexPath) return true
-      }
-      return false
+      const twin = resolveManagedStorageTwin(sessionManager, storage, sessionId, managedSessionPath)
+      if (!twin) return false
+      const expectedIndexPath = resolve(
+        twin.dataPath,
+        'genui-apps',
+        bundleMatch[2],
+        'index.html',
+      )
+      return candidatePath === expectedIndexPath
     } catch {
       return false
     }

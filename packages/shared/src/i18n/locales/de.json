@@ -336,6 +336,8 @@
   "chat.learnMore": "Mehr erfahren",
   "chat.loadConversationFailed": "Unterhaltung konnte nicht geladen werden",
   "chat.mentionFilesSkillsSources": "Dateien, Skills oder Quellen erwähnen",
+  "chat.messagesLoadBlocked.message": "Sitzungsinhalt nicht geladen — vor dem Senden erneut versuchen",
+  "chat.messagesLoadBlocked.retry": "Erneut versuchen",
   "chat.messagesUnavailable": "Sitzungsnachrichten sind nicht verfügbar",
   "chat.modelPicker.adminConfigured": "Models are configured by your administrator.",
   "chat.modelPicker.contextSection": "Kontext",

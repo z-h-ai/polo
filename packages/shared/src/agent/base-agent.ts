@@ -374,12 +374,20 @@ export abstract class BaseAgent implements AgentBackend {
 
     // Initialize core modules
     // PermissionManager: handles permission evaluation, mode management, and command whitelisting
+    // POO-205 C5: plans/data live INSIDE the session's actual store directory
+    // (config.sessionDir when the host sends one — a project session's store
+    // — else the legacy workspace-root layout, unchanged for personal spaces).
+    const constructorSessionDir = this.resolveSessionDir();
     this.permissionManager = new PermissionManager({
       workspaceId: config.workspace.id,
       sessionId: this._sessionId,
       workingDirectory: this.workingDirectory,
-      plansFolderPath: this.sessionStorage.getPlansPath(config.workspace.rootPath, this._sessionId),
-      dataFolderPath: this.sessionStorage.getDataPath(config.workspace.rootPath, this._sessionId),
+      plansFolderPath: constructorSessionDir
+        ? join(constructorSessionDir, 'plans')
+        : this.sessionStorage.getPlansPath(config.workspace.rootPath, this._sessionId),
+      dataFolderPath: constructorSessionDir
+        ? join(constructorSessionDir, 'data')
+        : this.sessionStorage.getDataPath(config.workspace.rootPath, this._sessionId),
     });
 
     // SourceManager: tracks active/inactive sources and formats state for context injection
@@ -868,6 +876,19 @@ ${formattedMessages}
   }
 
   /**
+   * POO-205 C5: the session's ACTUAL store directory. The SessionManager
+   * derives it from the record's projectId and sends it as config.sessionDir
+   * (a project session lives in the project store, never in the legacy
+   * workspace root). Absent → legacy `{workspaceRoot}/sessions/{id}` layout,
+   * which is also the correct answer for personal-space sessions.
+   */
+  protected resolveSessionDir(): string | undefined {
+    if (this.config.sessionDir) return this.config.sessionDir;
+    if (!this._sessionId || !this.config.workspace.rootPath) return undefined;
+    return this.sessionStorage.getSessionPath(this.config.workspace.rootPath, this._sessionId);
+  }
+
+  /**
    * Get the session storage path for this agent's session.
    * Convenience wrapper around getSessionPath() with null-checking.
    *
@@ -1285,7 +1306,10 @@ ${formattedMessages}
    * Shared across all backends. Codex overrides validateCallLlmModel() for provider filtering.
    */
   protected async preExecuteCallLlm(input: Record<string, unknown>): Promise<LLMQueryResult> {
-    const sessionPath = this.sessionStorage.getSessionPath(this.config.workspace.rootPath, this._sessionId);
+    // POO-205 C5: call_llm payload spill goes to the session's ACTUAL store
+    // directory (project store for project sessions).
+    const sessionPath = this.resolveSessionDir()
+      ?? this.sessionStorage.getSessionPath(this.config.workspace.rootPath, this._sessionId);
     const request = await buildCallLlmRequest(input, {
       backendName: this.backendName,
       sessionPath,

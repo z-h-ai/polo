@@ -248,6 +248,19 @@ export interface CoreBackendConfig {
   /** Session configuration (for resume) */
   session?: Session;
 
+  /**
+   * POO-205 C5: the session's ACTUAL store directory — the SessionManager
+   * derives it from the record's projectId (a project session lives in
+   * `{workspaceRoot}/project-sessions/{projectId}/sessions/{id}`, never in
+   * the legacy workspace root) and sends it here. Every session-scoped
+   * artifact path (transcripts, plans, data, downloads, screenshots, MCP
+   * payload spill) MUST resolve through this directory. When absent (older
+   * hosts, external callers), backends fall back to the legacy
+   * `{workspace.rootPath}/sessions/{id}` layout so nothing breaks — which is
+   * exactly right for personal-space sessions, whose store IS that layout.
+   */
+  sessionDir?: string;
+
   /** Initial model ID */
   model?: string;
 

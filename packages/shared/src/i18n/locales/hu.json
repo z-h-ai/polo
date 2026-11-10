@@ -336,6 +336,8 @@
   "chat.learnMore": "Tudj meg többet",
   "chat.loadConversationFailed": "A beszélgetés betöltése sikertelen",
   "chat.mentionFilesSkillsSources": "Fájlok, skillek, források megemlítése",
+  "chat.messagesLoadBlocked.message": "A munkamenet tartalma nincs betöltve — küldés előtt próbálja újra",
+  "chat.messagesLoadBlocked.retry": "Újra",
   "chat.messagesUnavailable": "A munkamenet üzenetei nem elérhetők",
   "chat.modelPicker.adminConfigured": "Models are configured by your administrator.",
   "chat.modelPicker.contextSection": "Kontextus",

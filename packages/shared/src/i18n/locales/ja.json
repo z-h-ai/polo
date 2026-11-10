@@ -336,6 +336,8 @@
   "chat.learnMore": "詳細を見る",
   "chat.loadConversationFailed": "会話の読み込みに失敗しました",
   "chat.mentionFilesSkillsSources": "ファイル、スキル、ソースをメンション",
+  "chat.messagesLoadBlocked.message": "セッション内容が未読み込みです — 送信前に再試行してください",
+  "chat.messagesLoadBlocked.retry": "再試行",
   "chat.messagesUnavailable": "セッションのメッセージを利用できません",
   "chat.modelPicker.adminConfigured": "Models are configured by your administrator.",
   "chat.modelPicker.contextSection": "コンテキスト",

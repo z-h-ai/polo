@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
@@ -21,6 +21,9 @@ mock.module('../../webview-security', () => ({
   setGenUiGuestDeepLinkForwarder: (forwarder: unknown) => {
     wiredForwarder = forwarder
   },
+  // P1-3 app-data hooks surface also sits in genui.ts's import graph; the
+  // mock captures nothing for it — the hooks wiring is not under test here.
+  setGenUiGuestAppDataHooks: () => {},
 }))
 mock.module('electron', () => ({
   app: { on: () => {}, getPath: () => tmpdir() },
@@ -204,7 +207,7 @@ describe('genui PUBLISH_APP_AS_ARTIFACT packaging gate', () => {
   let publish: (ctx: { workspaceId?: string; webContentsId?: number }, request: { sessionId: string; appId: string; title: string }) => Promise<{
     ok: boolean
     error?: string
-    payloadBase64?: string
+    bundleTempPath?: string
     entry?: { runtime: string; path: string }
     checksum?: string
     sizeBytes?: number
@@ -275,14 +278,17 @@ describe('genui PUBLISH_APP_AS_ARTIFACT packaging gate', () => {
     })
     expect(record.checksum).toMatch(/^[0-9a-f]{64}$/)
 
-    // The zip: root layout, index.html only (version.json is session-local).
-    const archive = unzipSync(new Uint8Array(Buffer.from(result.payloadBase64!, 'base64')))
+    // The zip lands in a Main-owned temp file (POO-205: bundle bytes never
+    // transit the renderer) — root layout, index.html only (version.json is
+    // session-local).
+    expect(result.bundleTempPath).toBeTruthy()
+    const archive = unzipSync(new Uint8Array(readFileSync(result.bundleTempPath!)))
     expect(Object.keys(archive).sort()).toEqual(['index.html'])
     expect(new TextDecoder().decode(archive['index.html']!)).toBe(html)
     expect(result.entry).toEqual({ runtime: 'static', path: 'index.html' })
-    // Checksum matches the payload bytes; the notice ships the policy copy.
+    // Checksum matches the on-disk ZIP bytes; the notice ships the policy copy.
     const { createHash } = await import('node:crypto')
-    expect(result.checksum).toBe(createHash('sha256').update(Buffer.from(result.payloadBase64!, 'base64')).digest('hex'))
+    expect(result.checksum).toBe(createHash('sha256').update(readFileSync(result.bundleTempPath!)).digest('hex'))
     expect(result.sizeBytes).toBeGreaterThan(0)
     expect(result.policyNotice).toContain('@polo-ai/sdk')
     expect(result.policyNotice).toContain('bridge protocol 1')
@@ -356,7 +362,123 @@ describe('genui PUBLISH_APP_AS_ARTIFACT packaging gate', () => {
 
     expect(result.ok).toBe(false)
     expect(result.error).toBeTruthy()
-    expect(result.payloadBase64).toBeUndefined()
+    expect(result.bundleTempPath).toBeUndefined()
     expect(statSync(join(rootDir, 'sessions', 'sess-1', 'audit.jsonl')).isDirectory()).toBe(true)
+  })
+})
+
+// ── POO-205 C5: project-store session paths ─────────────────────────────────
+// A project session's artifacts live in `{ws}/project-sessions/{projectId}/
+// sessions/{id}`, never in the legacy workspace root. The trust gates must
+// accept that real directory (matched against the storage candidate list) and
+// keep rejecting a forged legacy-root twin of it.
+
+describe('genui project-store session paths (POO-205 C5)', () => {
+  let rootDir: string
+  const projectId = 'proj-1'
+
+  /** The SessionManager derives the managed path from the record's projectId. */
+  const projectManagedPath = (sessionId: string) =>
+    join(rootDir, 'project-sessions', projectId, 'sessions', sessionId)
+
+  /** Workspace-rooted storage stand-in WITH the C5 candidate surface. */
+  const projectAwareStorage = {
+    getSessionPath: (root: string, id: string) => join(root, 'sessions', id),
+    getDataPath: (root: string, id: string) => join(root, 'sessions', id, 'data'),
+    listSessionDirCandidates: (root: string, id: string) => [
+      join(root, 'sessions', id),
+      join(root, 'project-sessions', projectId, 'sessions', id),
+    ],
+  }
+
+  /** Storage stand-in WITHOUT the C5 candidate surface (older-host fallback). */
+  const legacyOnlyStorage = {
+    getSessionPath: (root: string, id: string) => join(root, 'sessions', id),
+    getDataPath: (root: string, id: string) => join(root, 'sessions', id, 'data'),
+  }
+
+  function projectDeps(storage: typeof projectAwareStorage | typeof legacyOnlyStorage = projectAwareStorage) {
+    return {
+      windowManager: { getWorkspaceForWindow: () => 'ws-1' },
+      sessionManager: {
+        getWorkspaces: () => [{ id: 'ws-1', rootPath: rootDir }],
+        getSessionPath: projectManagedPath,
+      },
+      sessionStorage: storage,
+    }
+  }
+
+  function writeBundleUnder(rootPath: string, appId: string, html = '<html><body>app</body></html>'): string {
+    const appDir = join(rootPath, 'sess-1', 'data', 'genui-apps', appId)
+    mkdirSync(appDir, { recursive: true })
+    const indexPath = join(appDir, 'index.html')
+    writeFileSync(indexPath, html, 'utf-8')
+    return indexPath
+  }
+
+  function auditRequest(overrides: Partial<GenUiAppPinAuditRequest> = {}): GenUiAppPinAuditRequest {
+    const appId = overrides.appId ?? 'app-abc'
+    return {
+      sessionId: 'sess-1',
+      appId,
+      title: 'Demo',
+      indexPath: overrides.indexPath
+        ?? join(rootDir, 'project-sessions', projectId, 'sessions', 'sess-1', 'data', 'genui-apps', appId, 'index.html'),
+      version: 1,
+      pinnedAppId: overrides.pinnedAppId ?? `${GENUI_PINNED_APP_ID_PREFIX}${appId}`,
+      ...overrides,
+    }
+  }
+
+  beforeEach(() => {
+    rootDir = mkdtempSync(join(tmpdir(), 'genui-project-'))
+    setWebAppArtifactPolicy(undefined)
+    wiredValidator = null
+  })
+
+  afterEach(() => {
+    setWebAppArtifactPolicy(undefined)
+    rmSync(rootDir, { recursive: true, force: true })
+  })
+
+  it('pins a project-session bundle whose real path lives in the project store', async () => {
+    const indexPath = writeBundleUnder(join(rootDir, 'project-sessions', projectId, 'sessions'), 'app-abc')
+    const handlers = loadHandlerWith(projectDeps())
+    const handler = handlers.get(RPC_CHANNELS.genui.AUDIT_APP_PIN) as unknown as AuditHandler
+    const result = await handler({ workspaceId: 'ws-1', webContentsId: 7 }, auditRequest())
+
+    expect(result.ok).toBe(true)
+    // The audit line lands in the PROJECT store, not the legacy root.
+    const projectAuditPath = join(rootDir, 'project-sessions', projectId, 'sessions', 'sess-1', 'audit.jsonl')
+    expect(existsSync(projectAuditPath)).toBe(true)
+    expect(existsSync(join(rootDir, 'sessions', 'sess-1', 'audit.jsonl'))).toBe(false)
+    expect(JSON.parse(readFileSync(projectAuditPath, 'utf-8').trim()).indexPath).toBe(resolve(indexPath))
+  })
+
+  it('rejects a forged legacy-root bundle path for a project session', async () => {
+    // The legacy-root twin REALLY exists on disk, but the managed session
+    // lives in the project store — the bundle path is not the derived one.
+    const forgedIndexPath = writeBundleUnder(join(rootDir, 'sessions'), 'app-abc')
+    const handlers = loadHandlerWith(projectDeps())
+    const handler = handlers.get(RPC_CHANNELS.genui.AUDIT_APP_PIN) as unknown as AuditHandler
+    const result = await handler({ workspaceId: 'ws-1', webContentsId: 7 }, auditRequest({ indexPath: forgedIndexPath }))
+
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain('does not match')
+    expect(existsSync(join(rootDir, 'project-sessions', projectId, 'sessions', 'sess-1', 'audit.jsonl'))).toBe(false)
+    expect(existsSync(join(rootDir, 'sessions', 'sess-1', 'audit.jsonl'))).toBe(false)
+  })
+
+  it('keeps a legacy-only host (no candidate surface) rejecting project-store paths', async () => {
+    const indexPath = writeBundleUnder(join(rootDir, 'project-sessions', projectId, 'sessions'), 'app-abc')
+    const handlers = loadHandlerWith(projectDeps(legacyOnlyStorage))
+    const handler = handlers.get(RPC_CHANNELS.genui.AUDIT_APP_PIN) as unknown as AuditHandler
+    const result = await handler({ workspaceId: 'ws-1', webContentsId: 7 }, auditRequest({ indexPath }))
+
+    // Back-compat fallback: without the candidate surface the storage can
+    // only derive the legacy root, so the project-store managed path cannot
+    // match — fail closed.
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain('mismatch')
   })
 })

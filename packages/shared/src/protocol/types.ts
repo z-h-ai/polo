@@ -94,6 +94,10 @@ export type ErrorCode =
   | 'PROTOCOL_VERSION_UNSUPPORTED'
   | 'SESSION_NOT_IDLE'
   | 'SESSION_ID_CONFLICT'
+  // POO-205 C5 (X2): sendMessage refused because the session's persisted
+  // content exists on disk but could not be loaded into memory — sending
+  // would risk persisting over the unreadable history with an empty one.
+  | 'SESSION_CONTENT_UNAVAILABLE'
   | 'ARTIFACT_NOT_PORTABLE'
   | 'TRANSFER_TOO_LARGE'
   | 'TRANSFER_TIMEOUT'
@@ -128,6 +132,9 @@ const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set<string>([
   'PROTOCOL_VERSION_UNSUPPORTED',
   'SESSION_NOT_IDLE',
   'SESSION_ID_CONFLICT',
+  // POO-205 C5 (X2): the session's on-disk content exists but failed to
+  // load; sends are refused rather than risking an empty-history overwrite.
+  'SESSION_CONTENT_UNAVAILABLE',
   'ARTIFACT_NOT_PORTABLE',
   'TRANSFER_TOO_LARGE',
   'TRANSFER_TIMEOUT',

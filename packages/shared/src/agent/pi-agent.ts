@@ -423,8 +423,11 @@ export class PiAgent extends BaseAgent {
     }
 
     // Set session dir on adapter for concurrent-safe toolMetadataStore lookups
-    if (config.session?.id && config.workspace.rootPath) {
-      this.adapter.setSessionDir(this.sessionStorage.getSessionPath(config.workspace.rootPath, config.session.id));
+    // (POO-205 C5: the ACTUAL store directory — config.sessionDir when the
+    // host sends one, else the legacy workspace-root layout).
+    const adapterSessionDir = this.resolveSessionDir();
+    if (adapterSessionDir) {
+      this.adapter.setSessionDir(adapterSessionDir);
     }
 
     // Wire the adapter's async overflow fallback into the event queue. The
@@ -498,9 +501,12 @@ export class PiAgent extends BaseAgent {
     });
 
     // Build session ID and session dir path upfront (used for spawn env + init command)
+    // POO-205 C5: the spawn env, private pi-home and the init sessionPath all
+    // use the session's ACTUAL store directory (config.sessionDir for project
+    // sessions), falling back to the legacy workspace-root layout.
     const sessionId = this.config.session?.id || `agent-${Date.now()}`;
     const sessionDir = this.config.session
-      ? this.sessionStorage.getSessionPath(this.config.workspace.rootPath, sessionId)
+      ? this.resolveSessionDir()
       : undefined;
 
     // Build spawn args — optionally preload the network interceptor
@@ -599,10 +605,17 @@ export class PiAgent extends BaseAgent {
       this.eventQueue.complete();
     });
 
+    // POO-205 C5: init carries the session's ACTUAL store directory — the
+    // subprocess builds .pi-sessions/.pi-agent/plans inside it. The wire
+    // field name stays `sessionPath` (its consumers only ever meaning
+    // "this session's directory"); an absent sessionDir falls back to the
+    // legacy workspace-root layout.
     const sessionPath = this.config.session
-      ? this.sessionStorage.getSessionPath(this.config.workspace.rootPath, sessionId)
+      ? (this.resolveSessionDir() ?? '')
       : '';
-    const plansFolderPath = this.sessionStorage.getPlansPath(this.config.workspace.rootPath, sessionId);
+    const plansFolderPath = sessionPath
+      ? join(sessionPath, 'plans')
+      : this.sessionStorage.getPlansPath(this.config.workspace.rootPath, sessionId);
     const workingDirectory = this.config.session?.workingDirectory || cwd;
 
     // Send init command (flat structure matching subprocess InboundMessage type)
@@ -1489,12 +1502,19 @@ export class PiAgent extends BaseAgent {
     const rootPath = this.config.workspace.rootPath ?? this.workingDirectory;
     const workspaceSlug = extractWorkspaceSlug(rootPath, this.config.workspace.id);
     const sessionId = this.config.session?.id || this._sessionId;
-    const plansFolderPath = sessionId
-      ? this.sessionStorage.getPlansPath(rootPath, sessionId)
-      : undefined;
-    const dataFolderPath = sessionId
-      ? this.sessionStorage.getDataPath(rootPath, sessionId)
-      : undefined;
+    // POO-205 C5: RTK plans/data paths resolve to the session's ACTUAL store
+    // directory when the host sent one.
+    const sessionDir = this.resolveSessionDir();
+    const plansFolderPath = sessionDir
+      ? join(sessionDir, 'plans')
+      : sessionId
+        ? this.sessionStorage.getPlansPath(rootPath, sessionId)
+        : undefined;
+    const dataFolderPath = sessionDir
+      ? join(sessionDir, 'data')
+      : sessionId
+        ? this.sessionStorage.getDataPath(rootPath, sessionId)
+        : undefined;
 
     // Build RTK context fresh per call so toggling the preference takes
     // effect without restart. `getRtkPath()` is cached per process.
@@ -1918,7 +1938,9 @@ export class PiAgent extends BaseAgent {
 
           let content = result.output;
           if (result.image) {
-            const sessionPath = this.sessionStorage.getSessionPath(this.config.workspace.rootPath, this._sessionId);
+            // POO-205 C5: screenshots spill into the session's ACTUAL store directory.
+            const sessionPath = this.resolveSessionDir()
+              ?? this.sessionStorage.getSessionPath(this.config.workspace.rootPath, this._sessionId);
             const imageBuffer = Buffer.from(result.image.data, 'base64');
             const ext = result.image.mimeType === 'image/jpeg' ? 'jpg' : 'png';
             const saved = saveBinaryResponse(sessionPath, `browser-screenshot.${ext}`, imageBuffer, result.image.mimeType);
@@ -2440,7 +2462,11 @@ export class PiAgent extends BaseAgent {
 
       // Build context parts using centralized PromptBuilder
       const contextParts = this.promptBuilder.buildContextParts(
-        { plansFolderPath: this.sessionStorage.getPlansPath(this.config.workspace.rootPath, this._sessionId) },
+        {
+          plansFolderPath: this.resolveSessionDir()
+            ? join(this.resolveSessionDir()!, 'plans')
+            : this.sessionStorage.getPlansPath(this.config.workspace.rootPath, this._sessionId),
+        },
         sourceContext
       );
 

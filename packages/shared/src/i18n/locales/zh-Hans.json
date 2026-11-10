@@ -336,6 +336,8 @@
   "chat.learnMore": "了解更多",
   "chat.loadConversationFailed": "加载会话内容失败",
   "chat.mentionFilesSkillsSources": "提及文件、技能、数据源",
+  "chat.messagesLoadBlocked.message": "会话内容未加载，重试后再发送",
+  "chat.messagesLoadBlocked.retry": "重试",
   "chat.messagesUnavailable": "会话消息不可用",
   "chat.modelPicker.adminConfigured": "模型由管理员配置。",
   "chat.modelPicker.contextSection": "上下文",

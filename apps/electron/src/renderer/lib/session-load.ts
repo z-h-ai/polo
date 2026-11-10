@@ -64,6 +64,16 @@ export function deriveSessionMessagesLoadState({
   }
 }
 
+/**
+ * POO-205 C5 (X2): the composer must not send into a session whose content
+ * never loaded — the server refuses such sends (SESSION_CONTENT_UNAVAILABLE),
+ * and letting them through would invite persisting over unreadable history.
+ * A load that is still in flight (no error yet) is NOT a block.
+ */
+export function isSessionSendBlockedByLoadState(state: SessionMessagesLoadState): boolean {
+  return !state.messagesReady && !!state.error
+}
+
 export function shouldTreatSessionLoadFailureAsTransportFallback(
   state: TransportConnectionState | null | undefined,
 ): boolean {

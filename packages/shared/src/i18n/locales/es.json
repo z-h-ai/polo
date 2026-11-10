@@ -336,6 +336,8 @@
   "chat.learnMore": "Más información",
   "chat.loadConversationFailed": "No se pudo cargar la conversación",
   "chat.mentionFilesSkillsSources": "Menciona archivos, habilidades, fuentes",
+  "chat.messagesLoadBlocked.message": "Contenido de la sesión sin cargar — reintenta antes de enviar",
+  "chat.messagesLoadBlocked.retry": "Reintentar",
   "chat.messagesUnavailable": "Los mensajes de la sesión no están disponibles",
   "chat.modelPicker.adminConfigured": "Models are configured by your administrator.",
   "chat.modelPicker.contextSection": "Contexto",
