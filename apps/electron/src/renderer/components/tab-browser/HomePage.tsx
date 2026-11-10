@@ -34,7 +34,6 @@ import { HomeSpaceContext, type HomeSpaceCategory } from '@/components/product-s
 import { useProductSpaceAppLaunchHandoff, useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
 import { useStore } from 'jotai'
 import { enterProjectLightweight } from '@/components/projects/enter-project'
-import { ProjectSettingsView } from '@/components/projects/ProjectSettingsView'
 import { getActiveProjectFor } from '@/components/projects/projects-bus'
 import {
   readProjectVisitOrder,
@@ -522,9 +521,9 @@ export function HomePage({ onEnterProject }: {
    */
   const jotaiStore = useStore()
   const [enteringProjectId, setEnteringProjectId] = useState<string | null>(null)
-  // POO-205 §10: project settings live on the HOME project card now — the
-  // project TAB hosts conversations only (the App-level drawer retired).
-  const [settingsProject, setSettingsProject] = useState<ProjectDirectoryEntry | null>(null)
+  // POO-205 C8 (R8): the home card's settings button is retired — the ONE
+  // settings entry is the project tab sidebar's gear (ProjectTabSidebar), so
+  // an edited project is re-read by the tab that is already open.
   const handleEnterProject = useCallback((entry: ProjectDirectoryEntry) => {
     if (onEnterProject) {
       onEnterProject(entry.id)
@@ -1047,19 +1046,6 @@ export function HomePage({ onEnterProject }: {
                             <span className="inline-flex items-center whitespace-nowrap rounded-full bg-foreground-5 px-[7px] py-[1px] leading-[1.6]">
                               {t(`productSpace.role.${entry.role}`)}
                             </span>
-                            {(entry.role === 'owner' || entry.role === 'manager') && (
-                              <button
-                                type="button"
-                                data-testid="home-project-settings"
-                                className="inline-flex items-center whitespace-nowrap rounded-full border border-border px-[7px] py-[1px] font-medium leading-[1.6] text-foreground/70 hover:bg-foreground-5"
-                                onClick={(event) => {
-                                  event.stopPropagation()
-                                  setSettingsProject(entry)
-                                }}
-                              >
-                                {t('poo205.settings.title')}
-                              </button>
-                            )}
                             {/* P4: member count shows only when the data
                             source actually knows it. */}
                             {typeof entry.memberCount === 'number' && (
@@ -1779,47 +1765,6 @@ export function HomePage({ onEnterProject }: {
               {t('homeApps.actions.uninstall')}
             </Button>
           </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* POO-205 §10: project settings live on the HOME project card (the
-      project TAB hosts conversations only — the App-level drawer retired). */}
-      <Dialog open={settingsProject !== null} onOpenChange={(open) => { if (!open) setSettingsProject(null) }}>
-        <DialogContent className="max-w-[520px]" data-testid="home-project-settings-dialog">
-          <DialogHeader>
-            <DialogTitle>
-              {settingsProject
-                ? t('poo205.settings.titleNamed', { name: settingsProject.name })
-                : t('poo205.settings.title')}
-            </DialogTitle>
-          </DialogHeader>
-          {settingsProject && (
-            <div className="max-h-[60vh] overflow-y-auto pr-[2px]">
-              <ProjectSettingsView
-                project={{
-                  id: settingsProject.id,
-                  name: settingsProject.name,
-                  purpose: settingsProject.purpose,
-                  instructions: settingsProject.instructions,
-                  myRole: settingsProject.role,
-                  memberCount: settingsProject.memberCount ?? 1,
-                  createdByAccountId: '',
-                  organizationEnterpriseId: settingsProject.organizationEnterpriseId,
-                  organizationProductSpaceId: settingsProject.organizationProductSpaceId,
-                  createdAt: new Date().toISOString(),
-                  updatedAt: new Date().toISOString(),
-                }}
-                onSaved={(fresh) => {
-                  setProjectEntries(entries => entries.map(entry => (
-                    entry.id === fresh.id
-                      ? { ...entry, name: fresh.name, purpose: fresh.purpose, instructions: fresh.instructions }
-                      : entry
-                  )))
-                  setSettingsProject(null)
-                }}
-              />
-            </div>
-          )}
         </DialogContent>
       </Dialog>
 

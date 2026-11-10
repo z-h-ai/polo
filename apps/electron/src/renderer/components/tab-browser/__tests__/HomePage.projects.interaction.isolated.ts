@@ -425,6 +425,20 @@ describe('HomePage 项目区域 (POO-205, Spec Q1/Q3/Q8)', () => {
 })
 
 describe('HomePage U14 — 卡片层级（POO-205 保留）', () => {
+  // POO-205 C8 (R8): the ONE settings entry is the project tab sidebar's
+  // gear — the home card keeps a SINGLE action (enter), even for an owner.
+  it('R8: an owner project card has NO settings button — the card actions are role badge, count and the「进入项目」label only', async () => {
+    installProjectDirectory([
+      projectSummary('pj-owner', '华东区资料库', { myRole: 'owner' }),
+    ])
+    render(homeTree([enterpriseSpace(CURRENT_ORG_ID, '当前组织')]))
+    await waitFor(() => expect(screen.getAllByTestId('home-project-card')).toHaveLength(1))
+    expect(screen.queryByTestId('home-project-settings')).toBeNull()
+    expect(screen.queryByTestId('home-project-settings-dialog')).toBeNull()
+    expect(card('pj-owner').textContent).toContain('所有者')
+    expect(card('pj-owner').textContent).toContain('进入项目')
+  })
+
   it('U14: project cards gain the conversation bubble at the name level and keep the「进入项目」label, role badge, 「当前」marker and the FROZEN card chrome', async () => {
     installProjectDirectory([
       projectSummary('pj-entered', '已进入的项目', { myRole: 'owner' }),
