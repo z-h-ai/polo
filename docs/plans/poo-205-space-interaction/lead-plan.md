@@ -108,6 +108,7 @@ C = 客户端（POO-205-exec），A = polo-admin（admin worker）。每批独�
 
 客户端 `POO-205/refactor/space-interaction`：C1 `35d6b7a2`、C2 `a0c8ff7d`、C3 `ebdd1a11`、C4 `81fd7432`、C4-fix `0a203682`、C5 `f872fd25`、C6 `1ed6d1d7`、C8 `c72136ca`（合 `05a50a55`）、C10 `07d273ea`（合 `a4460eda`）、C7a `e5a7813c`、C11 `12b58d7d`（合 `b5648932`）、C7b `6d7ac696`、C9 `01569938`、C12 `b237a200`（合 `ff7df118`）。
 admin `POO-205/integration`：A1 `d2ed1e96`、A2 `7f8e21a4`（上一轮已入库）、A3a `8ce7b784`、A3b `8c070ade`、C13 `b39ce1b7`。
+负责人修复批（2026-11-10，M1 里程碑验收期发现）：X7 `f2c528f5`、X8 `87521a37`。
 §1/§2 审计与裁决全部对账落地；M1+M2+M3 里程碑范围内的批次全部收口，M4（三身份 e2e 与 i18n 清理）待做。
 
 ## 4. 边界（本轮不做，已知）
@@ -128,3 +129,6 @@ admin `POO-205/integration`：A1 `d2ed1e96`、A2 `7f8e21a4`（上一轮已入库
 | X3 | bf5344d3 修复前的项目会话：内存 meta 有 messageCount/preview，磁盘 session.jsonl 只有头行（历史未落盘）| `261109-dynamic-clay` meta messageCount=4，文件 1 行；`azure-hill`、`aware-lion` 同 | 边界：存量数据已丢，不可恢复；C5 后新会话不再出现 |
 | X4 | C5 开发期一次未 pin workspace 的测试实跑（`new SessionManager()`→真实 getWorkspaces→initialize→搬迁）动过真实 my-workspace：sharp-spruce/neat-sapphire 伴生目录被合并进项目库、statuses 图标重写 | worker pane 02:09 unpinned 跑；同批即改注入临时 workspace；副作用盘点仅上述两项，记录数据无损，journal 零冲突 finishedAt | 已随 C5 修复；「测试必须 pin workspace」写进后续批次约束 |
 | X5 | 21:41 启动的 e2e 实例持启动时旧 workspace 注册表（config 后来才改指 poo205-e2e），自动化 SchedulerTick 双写：隔离 events.jsonl 与真实 my-workspace/events.jsonl 每分钟各一份（同一 workspaceId）| 两文件 mtime 同步增长 + tick 内容对照 | 重启实例（载入 poo205-e2e）后复查：真实文件仍增 tick 则立独立修复批 |
+| X6 | 侧栏折叠态（sidebarVisible=false 持久化）下项目 Tab 身份头渲染在 0 宽 sidebarRef 容器内被盖住，成员/设置/新建会话入口全部不可见不可点 | 真实应用折叠态截图：项目头区域零像素 | M4 前修复（M1 收口时仍开） |
+| X7 | 项目会话 generate_app 画布写端用 sessionStorage 纯工作区根派生（{ws}/sessions/{id}），读端（twin 门/打包/校验）按 C5 store dir（project-sessions/prj_*/sessions/{id}）找 → 画布产物落旧根，「无法将此应用打包保存」必现 | 裸调 packageGenUiAppArtifact 前后对照；修复后 ok:true（bundle 992B, 6ms） | `f2c528f5` |
+| X8 | GenUiAppPublishBridge 每次保存带 sourceKey（A3b 幂等键），shared 协议与 server-core CreateSchema 均 .strict() 且无该字段 → 每次保存必 VALIDATION_ERROR（被 X7 掩盖，X7 修后显形）| 真实应用：点保存 → 按钮翻转「已保存到我的应用」；DB version1→重存 200+version2，恒 1 行 | `87521a37` |
