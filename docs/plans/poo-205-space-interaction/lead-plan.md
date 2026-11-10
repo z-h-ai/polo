@@ -76,7 +76,8 @@ C = 客户端（POO-205-exec），A = polo-admin（admin worker）。每批独�
 | C4 | C | R3/R4/R5/R6：企业无 Polo Tab、统一聊天入口分流、关 Tab 回首页、快捷键按可见 Tab、新 Tab 追加末尾、项目图标 | 7 类入口在企业空间都不出现无高亮 Tab |
 | C5 | C | 会话存储根统一：SessionManager 下发会话 store root，Pi/base-agent/分享/导出/删除/任务事件/genui 信任校验全部改用；旧根伴生目录一次性搬迁 | 跑一轮后 `{ws}/sessions/{id}` 不存在；删除不复活；Pi 分支成功；项目会话画布渲染 |
 | C6 | C | 跨项目守卫：分支 projectId 必须一致（服务端）；Agent 会话工具 scope 含 projectId；spawn_session 继承项目；importSession 企业空间校验；PROJECT_CONTEXT_REQUIRED 等码注册 + 7 locale 文案 | 定向单测 |
-| C7 | C | R9/R10/R12 服务端：发送与 CREATE 时取项目当前上下文并校验成员；Claude 注入指令；企业会话关闭个人 AGENTS.md/工作目录/数据源/skills；composer 隐藏工作目录 | 改指令后旧会话下一条回复体现；system prompt 反例断言测试 |
+| C7a | C | R9/R12 服务端：listProjects 解析器（30s TTL，三态 member/not_member/unavailable）；CREATE 用服务端快照并校验成员（不可用即拒绝）；SEND 刷新上下文推给 agent（不可用退回快照，非成员拒绝且不落盘）；Claude 注入；闭合标签中和与长度截断 | 改指令后旧会话下一条回复体现 |
+| C7b | C | R10：企业会话工作目录恒空、不读 AGENTS.md/CLAUDE.md、Claude settingSources=[]、数据源为空、个人 skills 关闭；composer 隐藏工作目录与数据源控件 | system prompt 反例断言测试 |
 
 ### M2 项目工作台可用（里程碑 2）
 
@@ -108,7 +109,9 @@ C = 客户端（POO-205-exec），A = polo-admin（admin worker）。每批独�
 项目级 MCP 数据源与配置分级（Q13-2）；存量会话迁移接线与旧企业升级（staging）；
 自行退出项目、删除项目；手动上传 HTML 到我的应用；创建项目时填写指令；会话列表
 按成员资格的服务端过滤（同账号本地数据）。真实 workspace 里前次 e2e 留下的测试会话
-待用户确认后清理。
+待用户确认后清理。企业空间下 Edit Popover（AI 编辑个人配置）禁用；自动化、消息网关 /new、
+远程会话迁入在企业空间不建会话，只给可读原因（C6）。他人在其他设备改项目指令，
+本机最迟 30 秒（解析器 TTL）后的下一次发送生效（C7a）。
 
 ## 5. 执行中新增发现（负责人验收时记录）
 
@@ -117,3 +120,5 @@ C = 客户端（POO-205-exec），A = polo-admin（admin worker）。每批独�
 | X1 | 全局设置浮层切 Tab 不关，盖住新 Tab 内容 | 真实应用：B Tab 开设置 → 点 A，路由已落 A 的会话，画面仍是设置 | C4 |
 | X2 | 会话「加载会话内容失败」时 composer 仍可发送；服务端发送路径是否先从磁盘装载再持久化未证实，存在以空历史覆写的风险 | `261109-sharp-spruce` 发送前磁盘仅头行（历史已因 X3 丢失），失败态下发送成功并写入 头+2 条 | C5 |
 | X3 | bf5344d3 修复前的项目会话：内存 meta 有 messageCount/preview，磁盘 session.jsonl 只有头行（历史未落盘）| `261109-dynamic-clay` meta messageCount=4，文件 1 行；`azure-hill`、`aware-lion` 同 | 边界：存量数据已丢，不可恢复；C5 后新会话不再出现 |
+| X4 | C5 开发期一次未 pin workspace 的测试实跑（`new SessionManager()`→真实 getWorkspaces→initialize→搬迁）动过真实 my-workspace：sharp-spruce/neat-sapphire 伴生目录被合并进项目库、statuses 图标重写 | worker pane 02:09 unpinned 跑；同批即改注入临时 workspace；副作用盘点仅上述两项，记录数据无损，journal 零冲突 finishedAt | 已随 C5 修复；「测试必须 pin workspace」写进后续批次约束 |
+| X5 | 21:41 启动的 e2e 实例持启动时旧 workspace 注册表（config 后来才改指 poo205-e2e），自动化 SchedulerTick 双写：隔离 events.jsonl 与真实 my-workspace/events.jsonl 每分钟各一份（同一 workspaceId）| 两文件 mtime 同步增长 + tick 内容对照 | 重启实例（载入 poo205-e2e）后复查：真实文件仍增 tick 则立独立修复批 |
