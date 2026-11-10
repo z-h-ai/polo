@@ -131,6 +131,12 @@ export function TabShell({ renderPolo, onReauthenticateRequest }: TabShellProps)
         return
       }
       if (!shouldSurfaceAssistantForNavigate(route)) return
+      // POO-205 §10: an active project tab IS the assistant surface for its
+      // sessions. Surfacing the (org-hidden) Polo app here yanked the user out
+      // of the project into the home surface on every 新建会话/会话选择 — the
+      // home all-sessions navigator then shows every workspace session, which
+      // is exactly the cross-project leak §10 forbids.
+      if (activeTab?.type === 'project') return
       openApp(POLO_APP_DEFINITION)
     }
     const handleGlobalSettings = (event: Event) => {
@@ -142,7 +148,7 @@ export function TabShell({ renderPolo, onReauthenticateRequest }: TabShellProps)
       window.removeEventListener(NAVIGATE_EVENT, handleNavigate)
       window.removeEventListener(GLOBAL_SETTINGS_EVENT, handleGlobalSettings)
     }
-  }, [isReady, openApp])
+  }, [isReady, openApp, activeTab])
 
   useEffect(() => {
     // Scope-neutral pre-hydration (Review R33/R34): keyboard shortcuts stay

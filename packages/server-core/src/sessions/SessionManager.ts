@@ -3620,7 +3620,12 @@ export class SessionManager implements ISessionManager {
 
       const storedSession: StoredSession = {
         ...pickSessionFields(managed),
-        workspaceRootPath: managed.workspace.rootPath,
+        // POO-205 (G4): the session's OWN store root rides the record — the
+        // persistence queue materializes the session at this path. Stamping the
+        // bare workspace root here re-materialized every project session in the
+        // root sessions/ directory on its first persist (the duplicate root
+        // copies that leaked other projects' sessions into the navigator).
+        workspaceRootPath: this.storeRootForManaged(managed),
         createdAt: managed.createdAt ?? Date.now(),
         lastUsedAt: Date.now(),
         messages: persistableMessages.map(messageToStored),
