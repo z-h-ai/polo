@@ -44,6 +44,11 @@ const CreateSchema = SpaceScopeSchema.extend({
   sourcePath: z.string().min(1).max(4_096),
   name: z.string().trim().min(1).max(256),
   description: z.string().max(2_000).optional(),
+  /** POO-205 X8 (§5): the A3b idempotency key (session+canvas) — forwarded to
+   * the service, which turns a re-save into a NEW VERSION (admin answers 200)
+   * instead of a duplicate row (201). Optional for older callers; strict keeps
+   * everything else out. */
+  sourceKey: z.string().min(1).max(256).optional(),
 }).strict()
 
 const AppIdSchema = SpaceScopeSchema.extend({

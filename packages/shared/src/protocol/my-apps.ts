@@ -78,6 +78,12 @@ export const MyAppsCreateFromFileInputSchema = MyAppsSpaceScopeSchema.extend({
   sourcePath: z.string().min(1).max(4_096),
   name: z.string().trim().min(1).max(256),
   description: z.string().max(2_000).optional(),
+  /** POO-205 X8 (§5): the A3b idempotency key — the same session+canvas
+   * re-saves as a NEW VERSION of one row (admin answers 200) instead of a
+   * duplicate row (201). The GenUiAppPublishBridge always sends it; without
+   * this field the strict envelope rejected every save with VALIDATION_ERROR
+   * (masked by X7's packaging failure until that was fixed). */
+  sourceKey: z.string().min(1).max(256).optional(),
 }).strict()
 export type MyAppsCreateFromFileInput = z.output<typeof MyAppsCreateFromFileInputSchema>
 
