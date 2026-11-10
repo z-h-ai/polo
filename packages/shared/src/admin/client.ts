@@ -43,6 +43,7 @@ import {
   AddProjectMembersInputSchema,
   CreateMyAppInputSchema,
   CreateProjectInputSchema,
+  DeleteMyAppResponseSchema,
   ListMyAppsResponseSchema,
   ListOrganizationColleaguesResponseSchema,
   ListProjectMembersResponseSchema,
@@ -56,9 +57,11 @@ import {
   UpdateProjectMemberResponseSchema,
   WithdrawMyAppResponseSchema,
   MyAppMutationResponseSchema,
+  type MyAppCreateOutcome,
   type AddProjectMembersInput,
   type CreateMyAppInput,
   type CreateProjectInput,
+  type DeleteMyAppResponse,
   type ListMyAppsResponse,
   type ListOrganizationColleaguesResponse,
   type ListProjectMembersResponse,
@@ -2036,13 +2039,35 @@ export class AdminClient {
   }
 
   /** POST /api/client/product-spaces/{spaceId}/my-apps — upload a static bundle
-   * as a member-private app (visibility `member`). Publishing is a separate call. */
-  async createMyApp(accessToken: string, productSpaceId: string, input: CreateMyAppInput): Promise<MyAppMutationResponse> {
-    const response = await this.request<unknown>(
+   * as a member-private app (visibility `member`). Publishing is a separate call.
+   * POO-205 A3b: the answer carries the HTTP status beside the parsed body —
+   * 201 = a NEW app row, 200 = a NEW VERSION of the row addressed by the
+   * request's `sourceKey`. The status is observed through `onResponse` (a pure
+   * side channel) rather than the streaming `readResponse` option, which drops
+   * nested error codes on >=400 and would erase myapps_* distinctions. */
+  async createMyApp(accessToken: string, productSpaceId: string, input: CreateMyAppInput): Promise<MyAppCreateOutcome> {
+    let status = 0;
+    const data = await this.request<unknown>(
       this.clientEnterpriseSpacePath(productSpaceId, '/my-apps'),
-      { method: 'POST', accessToken, body: CreateMyAppInputSchema.parse(input) },
+      {
+        method: 'POST',
+        accessToken,
+        body: CreateMyAppInputSchema.parse(input),
+        onResponse: (response) => { status = response.status; },
+      },
     );
-    return this.readSuccessResponse(response, MyAppMutationResponseSchema);
+    return { status, response: this.readSuccessResponse(data, MyAppMutationResponseSchema) };
+  }
+
+  /** DELETE .../my-apps/{appId} — remove the member app row (POO-205 A3b).
+   * A published app is withdrawn in the same transaction; the shared catalog
+   * entry disappears for every member. */
+  async deleteMyApp(accessToken: string, productSpaceId: string, appId: string): Promise<DeleteMyAppResponse> {
+    const response = await this.request<unknown>(
+      this.clientEnterpriseSpacePath(productSpaceId, `/my-apps/${encodeURIComponent(appId)}`),
+      { method: 'DELETE', accessToken },
+    );
+    return this.readSuccessResponse(response, DeleteMyAppResponseSchema);
   }
 
   /** POST .../my-apps/{appId}/publish — member → space. Enterprise spaces only. */
@@ -2431,6 +2456,11 @@ export class AdminClient {
     deadlineAt?: number;
     redirect?: 'manual';
     readResponse?: (response: Response, signal: AbortSignal) => Promise<unknown>;
+    /** POO-205 A3b: observe the raw Response (status) WITHOUT switching to
+     * the streaming `readResponse` path — that path clears `data` on >=400,
+     * which would erase the nested myapps_* error codes the caller branches
+     * on. Purely observational; it never changes parsing or error handling. */
+    onResponse?: (response: Response) => void;
     onAccessTokenRefreshed?: (token: string) => void;
   }): Promise<T> {
     if (options.deadlineAt !== undefined && options.deadlineAt <= Date.now()) {
@@ -2486,6 +2516,7 @@ export class AdminClient {
           // headers arrive. The body remains deadline-bounded, but a half-open
           // 401/403 body must not be reclassified as a transport timeout.
           response = fetchedResponse;
+          options.onResponse?.(fetchedResponse);
           if (options.redirect && (fetchedResponse.redirected || (fetchedResponse.status >= 300 && fetchedResponse.status < 400))) {
             void fetchedResponse.body?.cancel().catch(() => {});
             throw new MemberCircleInvalidResponseError();

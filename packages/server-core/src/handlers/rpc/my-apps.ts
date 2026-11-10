@@ -9,6 +9,7 @@ import {
   myAppsCreateFromFile,
   myAppsPublish,
   myAppsWithdraw,
+  myAppsDelete,
 } from '../../my-apps/service'
 
 /**
@@ -28,6 +29,7 @@ export const MY_APPS_HANDLED_CHANNELS = [
   RPC_CHANNELS.myApps.CREATE,
   RPC_CHANNELS.myApps.PUBLISH,
   RPC_CHANNELS.myApps.WITHDRAW,
+  RPC_CHANNELS.myApps.DELETE,
 ] as const
 
 const SpaceScopeSchema = z.object({
@@ -80,5 +82,10 @@ export function registerMyAppsHandlers(
   server.handle(RPC_CHANNELS.myApps.WITHDRAW, async (_ctx: RequestContext, rawInput: unknown) => {
     const input = parseOrThrow(AppIdSchema, rawInput)
     return myAppsWithdraw(input)
+  })
+
+  server.handle(RPC_CHANNELS.myApps.DELETE, async (_ctx: RequestContext, rawInput: unknown) => {
+    const input = parseOrThrow(AppIdSchema, rawInput)
+    return myAppsDelete(input)
   })
 }

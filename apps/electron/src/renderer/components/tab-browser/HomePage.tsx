@@ -24,12 +24,15 @@ import { useOptionalMemberCircles } from '@/context/MemberCircleResourceContext'
 import { useOptionalClientPage } from '@/context/ClientPageContext'
 import { useOptionalAppShellContext } from '@/context/AppShellContext'
 import { navigate, routes } from '@/lib/navigate'
-import { useMemberAppActions } from '@/hooks/useMemberAppActions'
+import {
+  isMemberAppBundleLaunch,
+  useMemberAppActions,
+} from '@/hooks/useMemberAppActions'
 import {
   useMyApps,
-  correlateMyAppsWithCatalogEntries,
   type MyAppsErrorCode,
 } from '@/hooks/useMyApps'
+import type { MyAppSummary } from '@polo-ai/shared/protocol'
 import { HomeSpaceContext, type HomeSpaceCategory } from '@/components/product-space/HomeSpaceContext'
 import { useProductSpaceAppLaunchHandoff, useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
 import { useStore } from 'jotai'
@@ -59,6 +62,7 @@ import { selectLostCircleAuthorizationIds } from '@/lib/member-circle-view'
 import {
   formatBytes,
   loadHomeAppUsage,
+  recordHomeAppUsage,
 } from '@/lib/home-app-usage'
 import {
   hideHomeApp,
@@ -302,6 +306,11 @@ export function HomePage({ onEnterProject }: {
   const [skillsDialogOpen, setSkillsDialogOpen] = useState(false)
   const [uninstallTarget, setUninstallTarget] = useState<CatalogApp | null>(null)
   const [preserveData, setPreserveData] = useState(true)
+  // C12 (R14): publish and delete are EXPLICIT confirmed steps on the
+  // 我的应用 rows — publish makes the app space-visible, delete removes the
+  // row (and withdraws the shared entry with it). Local and transient.
+  const [publishConfirmTarget, setPublishConfirmTarget] = useState<MyAppSummary | null>(null)
+  const [deleteConfirmTarget, setDeleteConfirmTarget] = useState<MyAppSummary | null>(null)
   // Directory toolbar state: search, source filter and sort.
   const [query, setQuery] = useState('')
   const [sourceFilter, setSourceFilter] = useState('all')
@@ -643,20 +652,13 @@ export function HomePage({ onEnterProject }: {
     setHiddenVersion(version => version + 1)
   }, [])
 
-  // ── POO-205 我的应用 partition ────────────────────────────────────────────
-  // Pairs the my-apps list with the catalog's member entries: the published
-  // pairing keys on the authoritative publishedEntryId; an unpublished app
-  // falls back to a UNIQUE name match (ambiguous names wire no mutation
-  // buttons — never a guess about which app to publish).
-  const myAppsCorrelation = useMemo(
-    () => correlateMyAppsWithCatalogEntries(myApps.state.apps),
-    [myApps.state.apps],
-  )
-  const myAppForEntry = useCallback((entry: HomeAppDirectoryEntry) => (
-    (entry.catalogEntryId && myAppsCorrelation.byPublishedEntryId.get(entry.catalogEntryId))
-    || myAppsCorrelation.unpublishedByName.get(entry.app.name.trim())
-    || null
-  ), [myAppsCorrelation])
+  // ── POO-205 我的应用 partition (C12, R14) ─────────────────────────────────
+  // The partition renders the myapps:list rows DIRECTLY — each row IS a
+  // MyAppSummary, the count IS the list length. The former
+  // catalog-member-row index + name correlation is retired here: two
+  // independent sources drifted (a count>0 empty grid, missing badges in
+  // personal spaces), and the list alone carries everything the row needs
+  // (publishedEntryId drives the badge/withdraw flip).
 
   /** Localizes a myapps_* failure for toasts (code carries over the bridge). */
   const myAppsErrorText = useCallback((error: unknown): string => {
@@ -670,39 +672,146 @@ export function HomePage({ onEnterProject }: {
         return t('poo205.myApps.errors.serviceUnavailable')
       case 'myapps_publish_unavailable_in_personal':
         return t('poo205.myApps.errors.unavailableInPersonal')
+      // POO-205 A3b: the space write gate (409) refuses saves AND publishes.
+      case 'myapps_space_restricted':
+        return t('poo205.myApps.errors.spaceRestricted')
       default:
         return t('poo205.myApps.errors.generic')
     }
   }, [t])
 
-  const handlePublishMyApp = useCallback(async (entry: HomeAppDirectoryEntry) => {
-    const app = myAppForEntry(entry)
-    if (!app) return
+  // Open by the member-app id DIRECTLY (C12, R14): the A3a admin launch
+  // branch keys on `member_app.id + owner`, so the appId itself is the
+  // launch key — no catalog-row resolution, no artifact/catalogVersion
+  // re-derivation that goes staleContext on a lagging cache. The install
+  // confirmation and the handoff publish stay the EXISTING member-app flow
+  // (:167-178 shape): an uninstalled (or stale-versioned) row stages the
+  // same prepare target; an installed one publishes the fresh grant as-is.
+  const handleOpenMyApp = useCallback(async (app: MyAppSummary) => {
+    if (phase !== 'ready') {
+      toast.error(
+        phase === 'offline'
+          ? t('homeApps.organization.offlineWarning')
+          : t('homeApps.errors.unavailable'),
+      )
+      return
+    }
+    const organizationId = catalog.state.catalog?.organizationId
+      ?? catalog.productSpace?.activeProductSpaceId
+      ?? null
+    if (!organizationId) {
+      toast.error(t('homeApps.errors.unavailable'))
+      return
+    }
+    try {
+      const result = await window.electronAPI.productSpaceResolveLaunch(organizationId, app.appId)
+      if (!result.success) {
+        // Same copyable-code failure surface as the shared-grid open (U5).
+        const launchError = new Error(result.message)
+        Object.assign(launchError, { code: result.errorCode, errorCode: result.errorCode })
+        toast.error(t('homeApps.errors.openTitle', { name: app.name }), {
+          description: (
+            <HomeAppErrorToastDescription
+              presentation={homeAppErrorPresentation(t, launchError, 'open', spaceKind)}
+            />
+          ),
+        })
+        return
+      }
+      const launch = result.launch
+      if (!isMemberAppBundleLaunch(launch)) {
+        // Fail closed: a member app always resolves to a bundle delivery;
+        // anything else is a foreign projection and never launches.
+        toast.error(t('homeApps.errors.unavailable'))
+        return
+      }
+      const accountId = catalog.state.catalog?.accountId
+        ?? catalog.productSpace?.accountId
+        ?? null
+      if (!accountId) {
+        toast.error(t('homeApps.errors.staleContext'))
+        return
+      }
+      // The row may lag (a re-save bumps the version and refreshes ONLY the
+      // my-apps list): re-sync before staging the install so confirmPrepare
+      // installs the version the fresh grant actually carries.
+      let catalogRow = catalog.state.catalog?.apps.find(
+        candidate => candidate.catalogEntryId === app.appId,
+      ) ?? null
+      if (!catalogRow || catalogRow.catalogVersion?.version !== launch.subject.version) {
+        await catalog.sync(true)
+        catalogRow = catalog.state.catalog?.apps.find(
+          candidate => candidate.catalogEntryId === app.appId,
+        ) ?? null
+      }
+      if (!catalogRow) {
+        toast.error(t('homeApps.errors.staleContext'))
+        return
+      }
+      const installState = catalog.getInstallState(catalogRow)
+      if (installState?.state === 'installed' && installState.currentVersion === launch.subject.version) {
+        // Installed at the granted version: hand off the FRESH launch —
+        // never a re-resolve through the row.
+        launchHandoff.publish(accountId, launch)
+        if (usageContextKeyRef.current) {
+          recordHomeAppUsage(usageContextKeyRef.current, app.appId)
+        }
+        return
+      }
+      memberActions.prepareMyApp(catalogRow, launch)
+    } catch (error) {
+      toast.error(t('homeApps.errors.openTitle', { name: app.name }), {
+        description: (
+          <HomeAppErrorToastDescription
+            presentation={homeAppErrorPresentation(t, error, 'open', spaceKind)}
+          />
+        ),
+      })
+    }
+  }, [catalog, launchHandoff, memberActions, phase, spaceKind, t])
+
+  const handlePublishMyApp = useCallback(async (app: MyAppSummary) => {
+    setPublishConfirmTarget(null)
     try {
       await myApps.publish(app.appId)
-      toast.success(t('poo205.myApps.toast.published', { name: entry.app.name }))
+      toast.success(t('poo205.myApps.toast.published', { name: app.name }))
       // Surface the new shared entry in the space directory immediately.
       await catalog.sync(true)
     } catch (error) {
-      toast.error(t('poo205.myApps.errors.publishFailedTitle', { name: entry.app.name }), {
+      toast.error(t('poo205.myApps.errors.publishFailedTitle', { name: app.name }), {
         description: myAppsErrorText(error),
       })
     }
-  }, [catalog, myAppForEntry, myApps, myAppsErrorText, t])
+  }, [catalog, myApps, myAppsErrorText, t])
 
-  const handleWithdrawMyApp = useCallback(async (entry: HomeAppDirectoryEntry) => {
-    const app = myAppForEntry(entry)
-    if (!app) return
+  const handleWithdrawMyApp = useCallback(async (app: MyAppSummary) => {
     try {
       await myApps.withdraw(app.appId)
-      toast.success(t('poo205.myApps.toast.withdrawn', { name: entry.app.name }))
+      toast.success(t('poo205.myApps.toast.withdrawn', { name: app.name }))
       await catalog.sync(true)
     } catch (error) {
-      toast.error(t('poo205.myApps.errors.withdrawFailedTitle', { name: entry.app.name }), {
+      toast.error(t('poo205.myApps.errors.withdrawFailedTitle', { name: app.name }), {
         description: myAppsErrorText(error),
       })
     }
-  }, [catalog, myAppForEntry, myApps, myAppsErrorText, t])
+  }, [catalog, myApps, myAppsErrorText, t])
+
+  // Delete removes the member-app row entirely; the admin side withdraws a
+  // published app in the same transaction, so the shared entry disappears
+  // for every member — hence the explicit confirmation (C12, R14).
+  const handleDeleteMyApp = useCallback(async (app: MyAppSummary) => {
+    setDeleteConfirmTarget(null)
+    try {
+      await myApps.delete(app.appId)
+      toast.success(t('poo205.myApps.toast.deleted', { name: app.name }))
+      // A published row's shared entry is gone too — refresh the directory.
+      await catalog.sync(true)
+    } catch (error) {
+      toast.error(t('poo205.myApps.errors.deleteFailedTitle', { name: app.name }), {
+        description: myAppsErrorText(error),
+      })
+    }
+  }, [catalog, myApps, myAppsErrorText, t])
 
   const confirmUninstall = async () => {
     const app = uninstallTarget
@@ -756,7 +865,7 @@ export function HomePage({ onEnterProject }: {
   // faces and never merge into an honest-vacuum claim.
   const myAppsReady = !myApps.state.loading && !myApps.state.errorCode
   const bothPartitionsEmpty = directoryEmpty && !directoryRejected
-    && myAppsReady && directory.myApps.length === 0
+    && myAppsReady && myApps.state.apps.length === 0
 
   return (
     // Frozen POO-41 `.main` mirror: the centered 1260px column with the
@@ -1492,7 +1601,7 @@ export function HomePage({ onEnterProject }: {
             )}
           </div>
         )}
-        {showDirectoryRows && phase === 'ready' && directory.entries.length === 0 && directory.myApps.length > 0 && (
+        {showDirectoryRows && phase === 'ready' && directory.entries.length === 0 && myApps.state.apps.length > 0 && (
           /* POO-205: the space holds ONLY member rows — the shared grid is
           honestly empty while the 我的应用 partition above carries the rows
           (the phase counts both partitions, so this face must exist). */
@@ -1544,8 +1653,10 @@ export function HomePage({ onEnterProject }: {
       the open action and (enterprise spaces only) the explicit publish /
       withdraw actions. The partition carries its own title, vacuum and
       failure faces; a personal space renders the same partition WITHOUT
-      the publish entry. */}
-      {catalog.productSpace && (
+      the publish entry. C12 (R14): the partition gates on the LIST's
+      committed scope — the member apps render in personal AND enterprise
+      spaces alike; only the publish entry stays enterprise-only. */}
+      {myApps.scope && (
         <section className="mb-[36px]" data-testid="home-my-apps">
           <div className="mb-[16px] flex flex-wrap items-center justify-between gap-[12px]">
             <div className="flex min-w-0 items-center gap-[10px]">
@@ -1588,7 +1699,7 @@ export function HomePage({ onEnterProject }: {
                 {t('homeApps.actions.tryAgain')}
               </button>
             </div>
-          ) : directory.myApps.length === 0 && !bothPartitionsEmpty ? (
+          ) : myApps.state.apps.length === 0 && !bothPartitionsEmpty ? (
             /* C11 (R15): this own vacuum only renders when the shared
             directory still has rows — with BOTH partitions empty the page's
             single merged empty state (in the shared-grid section above)
@@ -1601,97 +1712,103 @@ export function HomePage({ onEnterProject }: {
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-[16px] min-[761px]:grid-cols-2 min-[1081px]:grid-cols-3">
-              {directory.myApps.map((entry) => {
-                const app = myAppForEntry(entry)
-                const publishing = app ? myApps.state.publishingAppIds.has(app.appId) : false
-                const withdrawing = app ? myApps.state.withdrawingAppIds.has(app.appId) : false
-                const published = Boolean(app?.publishedEntryId)
-                const sourceLost = hasOnlyLostCircleSources(entry)
+              {/* C12 (R14): each row IS a myapps:list entry — no catalog-row
+              correlation. The published badge and the withdraw entry read
+              `publishedEntryId` straight off the row; open keys on the
+              member-app id DIRECTLY. */}
+              {myApps.state.apps.map((app) => {
+                const publishing = myApps.state.publishingAppIds.has(app.appId)
+                const withdrawing = myApps.state.withdrawingAppIds.has(app.appId)
+                const deleting = myApps.state.deletingAppIds.has(app.appId)
+                const published = Boolean(app.publishedEntryId)
                 return (
-                  <div key={entry.identityKey} className="group relative">
+                  <div key={app.appId} className="group relative">
                     <article
                       data-testid="home-myapp-card"
-                      data-identity-key={entry.identityKey}
-                      aria-busy={publishing || withdrawing || Boolean(memberActions.operationStates[entry.identityKey]) || undefined}
+                      data-identity-key={app.appId}
+                      aria-busy={publishing || withdrawing || deleting || undefined}
                       className="flex min-h-[210px] min-[1081px]:min-h-[222px] flex-col rounded-[20px] border border-border bg-surface client-material-card p-[18px] shadow-xs transition-[transform,border-color,box-shadow] duration-200 hover:-translate-y-[1px] hover:border-foreground-20 hover:shadow-middle min-[1081px]:p-[20px]"
                     >
                       <div className="mb-[18px] flex items-start justify-between gap-[8px]">
+                        {/* myapps:list rows carry no iconUrl (admin wire
+                        has none) — the letter tile is the only face. */}
                         <span className="grid size-[42px] flex-none place-items-center overflow-hidden rounded-[13px] bg-[var(--accent-soft)] text-accent">
-                          {entry.app.iconUrl
-                            ? <img src={entry.app.iconUrl} alt="" className="size-full object-cover" />
-                            : <span className="text-[17px] font-semibold">{entry.app.name.slice(0, 1)}</span>}
+                          <span className="text-[17px] font-semibold">{app.name.slice(0, 1)}</span>
                         </span>
-                        {app && (
-                          <span
-                            data-testid={`home-myapp-badge-${entry.identityKey}`}
-                            className={
-                              published
-                                ? 'inline-flex shrink-0 items-center whitespace-nowrap rounded-full bg-success/10 px-[8px] py-[1px] text-[11px] font-semibold leading-[1.6] text-success'
-                                : 'inline-flex shrink-0 items-center whitespace-nowrap rounded-full bg-foreground-5 px-[8px] py-[1px] text-[11px] font-semibold leading-[1.6] text-muted-foreground'
-                            }
-                          >
-                            {published
-                              ? t('poo205.myApps.badge.published')
-                              : t('poo205.myApps.badge.unpublished')}
-                          </span>
-                        )}
+                        {/* Published state reads the ROW (C12, R14): a
+                        non-null publishedEntryId IS published — no pairing
+                        with the catalog projection. */}
+                        <span
+                          data-testid={`home-myapp-badge-${app.appId}`}
+                          className={
+                            published
+                              ? 'inline-flex shrink-0 items-center whitespace-nowrap rounded-full bg-success/10 px-[8px] py-[1px] text-[11px] font-semibold leading-[1.6] text-success'
+                              : 'inline-flex shrink-0 items-center whitespace-nowrap rounded-full bg-foreground-5 px-[8px] py-[1px] text-[11px] font-semibold leading-[1.6] text-muted-foreground'
+                          }
+                        >
+                          {published
+                            ? t('poo205.myApps.badge.published')
+                            : t('poo205.myApps.badge.unpublished')}
+                        </span>
                       </div>
-                      <h3 className="m-0 text-[16px] font-bold leading-[normal]">{entry.app.name}</h3>
+                      <h3 className="m-0 text-[16px] font-bold leading-[normal]">{app.name}</h3>
                       <p className="mt-[17px] text-[14px] leading-[1.6] text-muted-foreground">
-                        {entry.app.description || t('homeApps.noDescription')}
+                        {app.description || t('homeApps.noDescription')}
                       </p>
-                      {entry.launchBlocked && (
-                        <p className="m-0 mt-[6px] text-[13px] leading-[1.5] text-muted-foreground">
-                          {sourceLost
-                            ? t('poo70.h3.home.sourceLostReason')
-                            : t('homeApps.errors.unavailable')}
-                        </p>
-                      )}
                       <div className="mt-auto flex items-center justify-end gap-[7px] pt-[14px]">
-                        {/* Publish (enterprise only) / withdraw — the explicit
-                        shared-directory actions over myapps:publish /
-                        myapps:withdraw. A personal space never renders the
-                        publish entry; an uncorrelated app renders neither. */}
-                        {myApps.canPublish && app && !published && (
+                        {/* Publish (enterprise only) / withdraw / delete —
+                        publish and delete route through their explicit
+                        confirmations; withdraw is reversible and stays
+                        one-click. A personal space never renders publish. */}
+                        {myApps.canPublish && !published && (
                           <button
                             type="button"
-                            data-testid={`home-myapp-publish-${entry.identityKey}`}
+                            data-testid={`home-myapp-publish-${app.appId}`}
                             disabled={publishing}
                             className="inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[13px] font-medium text-foreground hover:bg-foreground-5 disabled:opacity-60"
-                            onClick={() => { void handlePublishMyApp(entry) }}
+                            onClick={() => { setPublishConfirmTarget(app) }}
                           >
                             {publishing
                               ? t('poo205.myApps.publishingAction')
                               : t('poo205.myApps.publishAction')}
                           </button>
                         )}
-                        {app && published && (
+                        {published && (
                           <button
                             type="button"
-                            data-testid={`home-myapp-withdraw-${entry.identityKey}`}
+                            data-testid={`home-myapp-withdraw-${app.appId}`}
                             disabled={withdrawing}
                             className="inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border border-border bg-transparent px-[12px] text-[13px] font-medium text-foreground hover:bg-foreground-5 disabled:opacity-60"
-                            onClick={() => { void handleWithdrawMyApp(entry) }}
+                            onClick={() => { void handleWithdrawMyApp(app) }}
                           >
                             {withdrawing
                               ? t('poo205.myApps.withdrawingAction')
                               : t('poo205.myApps.withdrawAction')}
                           </button>
                         )}
-                        {/* Open through the SAME trusted flow as the shared
-                        grid (fresh resolve-launch grant; cached rows never
-                        launch). */}
                         <button
                           type="button"
-                          data-testid={`home-myapp-open-${entry.identityKey}`}
-                          disabled={entry.launchBlocked
-                            || Boolean(memberActions.operationStates[entry.identityKey])}
-                          className="inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border border-accent bg-accent px-[12px] text-[13px] font-semibold text-white shadow-minimal transition-[box-shadow,transform] duration-200 hover:-translate-y-[1px] hover:shadow-middle disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0 disabled:hover:shadow-none"
-                          onClick={() => handleOpenApp(entry)}
+                          data-testid={`home-myapp-delete-${app.appId}`}
+                          disabled={deleting}
+                          className="inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border border-transparent bg-transparent px-[12px] text-[13px] font-medium text-destructive hover:bg-destructive/10 disabled:opacity-60"
+                          onClick={() => { setDeleteConfirmTarget(app) }}
                         >
-                          {memberActions.operationStates[entry.identityKey]
-                            ? t('common.loading')
-                            : t('common.open')}
+                          {deleting
+                            ? t('poo205.myApps.deletingAction')
+                            : t('poo205.myApps.deleteAction')}
+                        </button>
+                        {/* Open keys on the member-app id DIRECTLY (C12,
+                        R14): resolve-launch by appId through the A3a admin
+                        branch, then the SAME install-confirmation/handoff
+                        flow as the shared grid. */}
+                        <button
+                          type="button"
+                          data-testid={`home-myapp-open-${app.appId}`}
+                          disabled={deleting}
+                          className="inline-flex min-h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border border-accent bg-accent px-[12px] text-[13px] font-semibold text-white shadow-minimal transition-[box-shadow,transform] duration-200 hover:-translate-y-[1px] hover:shadow-middle disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0 disabled:hover:shadow-none"
+                          onClick={() => { void handleOpenMyApp(app) }}
+                        >
+                          {t('common.open')}
                         </button>
                       </div>
                     </article>
@@ -1781,6 +1898,88 @@ export function HomePage({ onEnterProject }: {
               {prepareTargetApp && catalog.getInstallState(prepareTargetApp)?.state === 'installed'
                 ? t('homeApps.actions.update')
                 : t('homeApps.actions.install')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* POO-205 C12: the publish confirmation — publishing makes the app
+      visible to the WHOLE organization's space directory, so the click only
+      stages; cancel stages nothing. */}
+      <Dialog open={Boolean(publishConfirmTarget)} onOpenChange={(open) => {
+        if (!open) setPublishConfirmTarget(null)
+      }}>
+        <DialogContent style={workbenchStyle} overlayStyle={workbenchStyle} overlayClassName={clientWorkbenchOverlayClassName} className={clientWorkbenchDialogClassName}>
+          <DialogHeader>
+            <DialogTitle data-testid="home-myapp-publish-confirm-title">
+              {t('poo205.myApps.publishConfirmTitle', {
+                name: publishConfirmTarget?.name ?? t('homeApps.appFallback'),
+              })}
+            </DialogTitle>
+            <DialogDescription>
+              {t('poo205.myApps.publishConfirmBody')}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              className={clientWorkbenchButtonClassName}
+              type="button"
+              variant="secondary"
+              data-testid="home-myapp-publish-confirm-cancel"
+              onClick={() => setPublishConfirmTarget(null)}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button
+              className={clientWorkbenchPrimaryClassName}
+              type="button"
+              data-testid="home-myapp-publish-confirm-action"
+              onClick={() => { if (publishConfirmTarget) void handlePublishMyApp(publishConfirmTarget) }}
+            >
+              {t('poo205.myApps.publishConfirmAction')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* POO-205 C12: the delete confirmation — deleting removes the member
+      app AND (admin-side, same transaction) withdraws a published app, so
+      the shared directory entry disappears for every member; the copy says
+      so for published rows. Cancel stages nothing. */}
+      <Dialog open={Boolean(deleteConfirmTarget)} onOpenChange={(open) => {
+        if (!open) setDeleteConfirmTarget(null)
+      }}>
+        <DialogContent style={workbenchStyle} overlayStyle={workbenchStyle} overlayClassName={clientWorkbenchOverlayClassName} className={clientWorkbenchDialogClassName}>
+          <DialogHeader>
+            <DialogTitle data-testid="home-myapp-delete-confirm-title">
+              {t('poo205.myApps.deleteConfirmTitle', {
+                name: deleteConfirmTarget?.name ?? t('homeApps.appFallback'),
+              })}
+            </DialogTitle>
+            <DialogDescription data-testid="home-myapp-delete-confirm-body">
+              {deleteConfirmTarget?.publishedEntryId
+                ? t('poo205.myApps.deleteConfirmPublishedBody')
+                : t('poo205.myApps.deleteConfirmBody')}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              className={clientWorkbenchButtonClassName}
+              type="button"
+              variant="secondary"
+              data-testid="home-myapp-delete-confirm-cancel"
+              onClick={() => setDeleteConfirmTarget(null)}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button
+              className={clientWorkbenchButtonClassName}
+              type="button"
+              variant="destructive"
+              data-testid="home-myapp-delete-confirm-action"
+              onClick={() => { if (deleteConfirmTarget) void handleDeleteMyApp(deleteConfirmTarget) }}
+            >
+              {t('poo205.myApps.deleteConfirmAction')}
             </Button>
           </DialogFooter>
         </DialogContent>

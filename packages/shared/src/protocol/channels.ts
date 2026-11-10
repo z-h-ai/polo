@@ -473,6 +473,7 @@ export const RPC_CHANNELS = {
     CREATE: 'myapps:create',
     PUBLISH: 'myapps:publish',
     WITHDRAW: 'myapps:withdraw',
+    DELETE: 'myapps:delete',
   },
   creatorSkills: {
     GET_TARGET: 'creatorSkills:getTarget',

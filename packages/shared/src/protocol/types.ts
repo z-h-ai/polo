@@ -19,6 +19,7 @@ import {
   type ProjectErrorCode,
 } from './project-members'
 import { SESSION_PROJECT_ERROR_CODES, type SessionProjectErrorCode } from './session-project'
+import { MYAPPS_LOCAL_ERROR_CODES, type MyAppsLocalErrorCode } from './my-apps'
 
 // ---------------------------------------------------------------------------
 // Message envelope
@@ -117,6 +118,7 @@ export type ErrorCode =
   | PmLocalErrorCode
   | ProjectErrorCode
   | SessionProjectErrorCode
+  | MyAppsLocalErrorCode
 
 /**
  * Every code the transport preserves across the wire. This set MUST stay in
@@ -184,6 +186,13 @@ const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set<string>([
   // renderer's per-code recovery copy (project required in enterprise,
   // project rejected in personal, branch across projects) can never branch.
   ...SESSION_PROJECT_ERROR_CODES,
+  // MyAppsLocalErrorCode (POO-205 C12): the myapps channels' own boundary
+  // codes. Two of the three also ride PROJECT_ERROR_CODES, but
+  // `myapps_scope_changed` is raised ONLY at the trusted side's own committed
+  // fence — without this spread the transport rewrites it to HANDLER_ERROR
+  // and the renderer's "the active space changed" recovery copy can never
+  // branch.
+  ...MYAPPS_LOCAL_ERROR_CODES,
 ])
 
 export function isErrorCode(value: unknown): value is ErrorCode {

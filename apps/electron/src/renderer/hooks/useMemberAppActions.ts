@@ -96,6 +96,10 @@ export interface MemberAppActionsApi {
   confirmPrepare: () => Promise<void>
   /** Dismisses the pending prepare without installing. */
   cancelPrepare: () => void
+  /** POO-205 C12: stages the install confirmation for a launch resolved
+   * DIRECTLY by the member-app id (the 我的应用 open path), reusing the same
+   * confirmation target and `confirmPrepare` flow as `open`. */
+  prepareMyApp: (app: CatalogApp, launch: MemberAppBundleLaunch) => void
   /** The App currently waiting for the member's install/update confirmation. */
   prepareTarget: MemberAppPrepareTarget | null
   /** In-flight actions by UI identity key; empty when everything settled. */
@@ -235,10 +239,26 @@ export function useMemberAppActions({
     setPrepareTarget(null)
   }, [])
 
+  /**
+   * POO-205 C12: the 我的应用 open path resolves the launch DIRECTLY by the
+   * member-app id (the A3a admin branch keys on `member_app.id + owner`), so
+   * the fresh grant arrives pre-resolved instead of re-derived from the
+   * catalog row. This only stages the SAME install-confirmation target the
+   * `open` flow stages — the confirmation dialog, `confirmPrepare`'s
+   * install + re-resolve + handoff and the busy-state discipline stay the
+   * existing ones (:167-178 shape), never a bypass.
+   */
+  const prepareMyApp = useCallback((app: CatalogApp, launch: MemberAppBundleLaunch): void => {
+    if (prepareTargetRef.current) return
+    prepareTargetRef.current = { app, launch }
+    setPrepareTarget(prepareTargetRef.current)
+  }, [])
+
   return {
     open,
     confirmPrepare,
     cancelPrepare,
+    prepareMyApp,
     prepareTarget,
     operationStates,
   }
