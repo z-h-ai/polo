@@ -128,15 +128,15 @@ export function ProjectMembersPanel({
   const [removeTarget, setRemoveTarget] = useState<string | null>(null)
   const scopeKey = scope ? `${scope.accountId}:${scope.projectId}` : null
 
+  // The live authority is the list's own row; the shared roster's derived
+  // role only fills in until the list has spoken. The hint rides the hook's
+  // second argument — it must never leak into the strict pm wire scope.
   const members = useProjectMembers(scope ? {
     accountId: scope.accountId,
     productSpaceId: scope.productSpaceId,
     organizationEnterpriseId: scope.organizationEnterpriseId,
     projectId: scope.projectId,
-    // The live authority is the list's own row; the shared roster's derived
-    // role only fills in until the list has spoken.
-    viewerRoleHint: roster.viewerRole,
-  } : null)
+  } : null, roster.viewerRole)
   const canManage = members.canManage
   const colleagues = useProjectColleagues(open && page === 'directory' && canManage && scope
     ? {

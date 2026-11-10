@@ -13,8 +13,10 @@ import { PC_ERROR_CODES, PC_LOCAL_ERROR_CODES, type PcErrorCode } from './projec
 import {
   CLIENT_ENTERPRISE_ERROR_CODES,
   PM_LOCAL_ERROR_CODES,
+  PROJECT_ERROR_CODES,
   type ClientEnterpriseErrorCode,
   type PmLocalErrorCode,
+  type ProjectErrorCode,
 } from './project-members'
 
 // ---------------------------------------------------------------------------
@@ -108,6 +110,7 @@ export type ErrorCode =
   | PcErrorCode
   | ClientEnterpriseErrorCode
   | PmLocalErrorCode
+  | ProjectErrorCode
 
 /**
  * Every code the transport preserves across the wire. This set MUST stay in
@@ -160,6 +163,12 @@ const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set<string>([
   // (personal space, signed out, scope moved mid-command) so the renderer can
   // tell "no project here" and "switching accounts" apart from a down service.
   ...PM_LOCAL_ERROR_CODES,
+  // ProjectErrorCode (POO-205, poo205-contract-r1): the project & my-apps
+  // channels answer with these prj_*/myapps_* codes; without the spread the
+  // transport rewrites every one of them to HANDLER_ERROR and the renderer's
+  // per-code recovery copy (prj_last_owner, prj_member_not_in_organization…)
+  // can never branch.
+  ...PROJECT_ERROR_CODES,
 ])
 
 export function isErrorCode(value: unknown): value is ErrorCode {

@@ -21,12 +21,6 @@ import { projectActionErrorKey } from '../projects/projects-api'
  * here is persisted.
  */
 
-export type ProjectMembersScope = PmProjectScopeInput & {
-  /** Fallback while the member list has not spoken (the caller's last known
-   * role — the space summary). The LIST's own row is the live authority. */
-  viewerRoleHint?: ProjectRole | null
-}
-
 export type MemberListState = {
   items: ProjectMember[]
   loading: boolean
@@ -72,7 +66,20 @@ export type MemberMutationOutcome =
   | { ok: true }
   | { ok: false; errorKey: string }
 
-export function useProjectMembers(scope: ProjectMembersScope | null) {
+/** The 4 protocol scope keys, verbatim. The pm wire schemas are `.strict()`,
+ * so any UI-only field that leaks into an RPC input (e.g. a viewerRoleHint
+ * spread) is rejected server-side as an unknown key — the hint travels as
+ * the hook's second argument instead, never inside the scope object. */
+function wireScope(scope: PmProjectScopeInput): PmProjectScopeInput {
+  return {
+    accountId: scope.accountId,
+    productSpaceId: scope.productSpaceId,
+    organizationEnterpriseId: scope.organizationEnterpriseId,
+    projectId: scope.projectId,
+  }
+}
+
+export function useProjectMembers(scope: PmProjectScopeInput | null, viewerRoleHint?: ProjectRole | null) {
   const scopeKey = scope
     ? `${scope.accountId}:${scope.productSpaceId}:${scope.organizationEnterpriseId}:${scope.projectId}`
     : null
@@ -89,8 +96,8 @@ export function useProjectMembers(scope: ProjectMembersScope | null) {
     if (!scope) return null
     const mine = state.items.find(member => member.accountId === scope.accountId)
     if (mine) return mine.role
-    return state.errorKey ? null : (scope.viewerRoleHint ?? null)
-  }, [scope, state.errorKey, state.items])
+    return state.errorKey ? null : (viewerRoleHint ?? null)
+  }, [scope, viewerRoleHint, state.errorKey, state.items])
 
   const canManage = viewerRole === 'owner' || viewerRole === 'manager'
   const lostAccess = state.errorKey === 'projectMembers.error.forbidden'
@@ -100,7 +107,7 @@ export function useProjectMembers(scope: ProjectMembersScope | null) {
     const generation = ++generationRef.current
     setState(previous => ({ ...emptyList(), loading: previous.items.length === 0 }))
     try {
-      const response = await window.electronAPI.pmListProjectMembers({ ...scope })
+      const response = await window.electronAPI.pmListProjectMembers(wireScope(scope))
       if (generation !== generationRef.current) return
       setState({ items: response.members, loading: false, mutating: false, errorKey: null })
     } catch (error) {
@@ -129,7 +136,7 @@ export function useProjectMembers(scope: ProjectMembersScope | null) {
     setState(previous => ({ ...previous, mutating: true }))
     try {
       const response = await window.electronAPI.pmAddProjectMembers({
-        ...scope,
+        ...wireScope(scope),
         command: { accountIds: [...accountIds], role },
       })
       if (generation !== mutateGenerationRef.current) return { ok: false, errorKey: 'projectMembers.error.scopeChanged' }
@@ -149,7 +156,7 @@ export function useProjectMembers(scope: ProjectMembersScope | null) {
     setState(previous => ({ ...previous, mutating: true }))
     try {
       const response = await window.electronAPI.pmUpdateProjectMember({
-        ...scope,
+        ...wireScope(scope),
         targetAccountId,
         role,
       })
@@ -173,11 +180,11 @@ export function useProjectMembers(scope: ProjectMembersScope | null) {
     const generation = mutateGenerationRef.current
     setState(previous => ({ ...previous, mutating: true }))
     try {
-      await window.electronAPI.pmRemoveProjectMember({ ...scope, targetAccountId })
+      await window.electronAPI.pmRemoveProjectMember({ ...wireScope(scope), targetAccountId })
       if (generation !== mutateGenerationRef.current) return { ok: false, errorKey: 'projectMembers.error.scopeChanged' }
       // pm:removeProjectMember answers a bare {ok} — the fresh list needs an
       // explicit re-read (generation-guarded, same as a manual refresh).
-      const response = await window.electronAPI.pmListProjectMembers({ ...scope })
+      const response = await window.electronAPI.pmListProjectMembers(wireScope(scope))
       if (generation !== mutateGenerationRef.current) return { ok: false, errorKey: 'projectMembers.error.scopeChanged' }
       setState({ items: response.members, loading: false, mutating: false, errorKey: null })
       return { ok: true }

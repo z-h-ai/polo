@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
+import {
+  PmAddProjectMembersInputSchema,
+  PmListProjectMembersInputSchema,
+  PmRemoveProjectMemberInputSchema,
+  PmUpdateProjectMemberInputSchema,
+} from '@polo-ai/shared/protocol'
 import { i18n, setupI18n } from '@polo-ai/shared/i18n'
 import { createElement } from 'react'
 
@@ -99,6 +105,10 @@ function makeHarness(options: {
     value: {
       pmListProjectMembers: async (input: Record<string, unknown>) => {
         harness.listCalls.push(input)
+        // The wire schemas are .strict(): a UI-only key leaking into the
+        // scope (the old viewerRoleHint spread) must fail HERE, before the
+        // panel can pass against a laxer mock than the real transport.
+        PmListProjectMembersInputSchema.parse(input)
         const scripted = harness.listScript.shift()
         if (scripted instanceof Error) throw scripted
         if (scripted) return scripted
@@ -119,6 +129,7 @@ function makeHarness(options: {
       },
       pmAddProjectMembers: async (input: Record<string, unknown>) => {
         harness.addCalls.push(input)
+        PmAddProjectMembersInputSchema.parse(input)
         if (harness.addResponse instanceof Error) throw harness.addResponse
         const command = input.command as { accountIds: string[]; role: string }
         return {
@@ -132,6 +143,7 @@ function makeHarness(options: {
       },
       pmUpdateProjectMember: async (input: Record<string, unknown>) => {
         harness.updateCalls.push(input)
+        PmUpdateProjectMemberInputSchema.parse(input)
         if (harness.updateResponse instanceof Error) throw harness.updateResponse
         return {
           contractVersion: 'poo205-contract-r1',
@@ -140,6 +152,7 @@ function makeHarness(options: {
       },
       pmRemoveProjectMember: async (input: Record<string, unknown>) => {
         harness.removeCalls.push(input)
+        PmRemoveProjectMemberInputSchema.parse(input)
         if (harness.removeError) throw Object.assign(new Error(harness.removeError.code), { code: harness.removeError.code })
         return { ok: true }
       },
@@ -252,13 +265,13 @@ describe('ProjectMembersPanel (POO-205, Spec Q10)', () => {
     fireEvent.click(screen.getByTestId('project-colleagues-confirm'))
 
     await waitFor(() => expect(harness.harness.addCalls).toHaveLength(1))
-    expect(harness.harness.addCalls[0]).toMatchObject({
+    expect(harness.harness.addCalls[0]).toEqual({
       accountId: SCOPE.accountId,
       productSpaceId: SCOPE.productSpaceId,
       organizationEnterpriseId: SCOPE.organizationEnterpriseId,
       projectId: SCOPE.projectId,
+      command: { accountIds: ['colleague-1'], role: 'member' },
     })
-    expect(harness.harness.addCalls[0].command).toEqual({ accountIds: ['colleague-1'], role: 'member' })
 
     // The response IS the fresh list: back on the overview with 3 rows.
     await waitFor(() => expect(screen.getAllByTestId('project-members-roster-row')).toHaveLength(3))
@@ -291,7 +304,10 @@ describe('ProjectMembersPanel (POO-205, Spec Q10)', () => {
 
     fireEvent.click(menu.querySelector('[data-role="manager"]') as HTMLElement)
     await waitFor(() => expect(harness.harness.updateCalls).toHaveLength(1))
-    expect(harness.harness.updateCalls[0]).toMatchObject({
+    expect(harness.harness.updateCalls[0]).toEqual({
+      accountId: SCOPE.accountId,
+      productSpaceId: SCOPE.productSpaceId,
+      organizationEnterpriseId: SCOPE.organizationEnterpriseId,
       projectId: SCOPE.projectId,
       targetAccountId: 'owner-1',
       role: 'manager',
@@ -316,7 +332,13 @@ describe('ProjectMembersPanel (POO-205, Spec Q10)', () => {
 
     fireEvent.click(screen.getByTestId('project-members-remove-confirm-action'))
     await waitFor(() => expect(harness.harness.removeCalls).toHaveLength(1))
-    expect(harness.harness.removeCalls[0]).toMatchObject({ projectId: SCOPE.projectId, targetAccountId: 'owner-1' })
+    expect(harness.harness.removeCalls[0]).toEqual({
+      accountId: SCOPE.accountId,
+      productSpaceId: SCOPE.productSpaceId,
+      organizationEnterpriseId: SCOPE.organizationEnterpriseId,
+      projectId: SCOPE.projectId,
+      targetAccountId: 'owner-1',
+    })
     // removeProjectMember answers a bare {ok} → the panel re-reads the list.
     await waitFor(() => expect(harness.harness.listCalls).toHaveLength(2))
   })
