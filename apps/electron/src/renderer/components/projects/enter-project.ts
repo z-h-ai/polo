@@ -191,6 +191,72 @@ export function resolveChatEntryTarget(input: {
   return { kind: 'home-hint' }
 }
 
+/** The project payload the enterprise new-session entry passes through (a
+ * full LightweightProjectInput satisfies it; directory entries match). */
+export type EnterpriseChatEntryProject = LightweightProjectInput
+
+/** POO-205 C4-fix: where the enterprise「新建会话」request ended up. */
+export type EnterpriseChatEntryOutcome = 'in-project-empty' | 'project-empty' | 'home-hint'
+
+/** POO-205 C4 (R4) + C4-fix: the ENTIRE enterprise new-session routing as ONE
+ * injectable sequence — NavigationContext only wires the ports (and keeps the
+ * space-kind gate). The ordering IS the fix: when the request targets a
+ * project that is NOT already active (Home ⌘N with the tab closed, or open
+ * but not focused), `recordEmptyStateIntent` arms the empty-state markers
+ * BEFORE `enterProject` activates the tab. The project-landing invariant's
+ * effect therefore always sees the project as already landed
+ * (transition=false) with the intent armed — there is no interleave in which
+ * its stored/recent-conversation landing can race the empty-state navigation
+ * (the bug: reopening the most recent project landed its latest conversation
+ * instead of the empty state). The already-active case is synchronous
+ * (landEmptyState only): no window exists at all. An entry that fails to
+ * publish the project discards the armed intent so a later NORMAL entry
+ * keeps its full landing behavior. No path creates a session. */
+export async function routeEnterpriseNewSessionToTarget(ports: {
+  /** The active project at call time (null = Home / other tabs). */
+  getActiveProjectId: () => string | null
+  /** The active tab (resolveChatEntryTarget input). */
+  getActiveTab: () => { type: string; project?: { projectId: string } } | null
+  /** Project ids, most recently visited first (readProjectVisitOrder). */
+  getRecentProjectIds: () => ReadonlyArray<string>
+  /** The visible enterprise directory (the caller maps its list source). */
+  listVisibleProjects: () => Promise<ReadonlyArray<EnterpriseChatEntryProject>>
+  /** No accessible project: activate Home + surface the hint. */
+  abortToHome: () => void
+  /** Arm the empty-state intent for THIS project (BEFORE enterProject). */
+  recordEmptyStateIntent: (projectId: string) => void
+  /** The entry failed to publish the project — unarm the intent. */
+  discardEmptyStateIntent: () => void
+  /** Open/activate the project tab and publish the active project. */
+  enterProject: (project: EnterpriseChatEntryProject) => Promise<unknown>
+  /** Navigate to the (now or already active) project's empty state. */
+  landEmptyState: () => void
+}): Promise<EnterpriseChatEntryOutcome> {
+  if (ports.getActiveProjectId()) {
+    ports.landEmptyState()
+    return 'in-project-empty'
+  }
+  const projects = await ports.listVisibleProjects()
+  const target = resolveChatEntryTarget({
+    spaceKind: 'enterprise',
+    activeTab: ports.getActiveTab(),
+    recentProjectIds: ports.getRecentProjectIds(),
+    visibleProjects: projects,
+  })
+  const project = target.kind === 'project'
+    ? projects.find(candidate => candidate.id === target.projectId)
+    : undefined
+  if (!project) {
+    ports.abortToHome()
+    return 'home-hint'
+  }
+  ports.recordEmptyStateIntent(project.id)
+  const entered = await ports.enterProject(project)
+  if (!entered) ports.discardEmptyStateIntent()
+  ports.landEmptyState()
+  return 'project-empty'
+}
+
 /** Enter a project of the committed organization (lightweight). Returns the
  * published ActiveProjectRef (or null when the caller's scope was incomplete
  * — the click is then a no-op, never a fake navigation).

@@ -87,8 +87,8 @@ import { HOME_TAB_ID, projectTabId } from '../../shared/tab-browser-types'
 import { subscribeActiveProject, getActiveProjectRaw } from '@/components/projects/projects-bus'
 import {
   enterProjectLightweight,
-  resolveChatEntryTarget,
   resolveProjectLanding,
+  routeEnterpriseNewSessionToTarget,
   selectProjectSessionByProjectId,
   shouldLandProject,
   type ProjectFocusedSession,
@@ -802,7 +802,10 @@ export function NavigationProvider({
   /** Land the ACTIVE project's editable empty state — zero-write (R3): no
    * session is created until the first send. The empty-intent flag plus the
    * landed-project marker are both set inside navigate() so the landing
-   * invariant and auto-select stay out of the way. */
+   * invariant and auto-select stay out of the way. C4-fix: for a project the
+   * entry has to ACTIVATE first, the markers are armed before that
+   * activation (routeEnterpriseNewSessionToTarget) — this navigate only
+   * re-affirms them. */
   const landProjectEmptyState = useCallback(() => {
     void navigateRef.current(routes.view.allSessions(), { skipAutoSelect: true, projectEmptyIntent: true })
   }, [])
@@ -870,50 +873,51 @@ export function NavigationProvider({
    * links alike. Inside the project tab: the project's own empty state
    * (zero-write). Anywhere else: the most recent VISITED project that is
    * still visible, landed on ITS empty state; with no accessible project,
-   * Home + the create/enter hint. The personal space never reaches this. */
+   * Home + the create/enter hint. The personal space never reaches this.
+   *
+   * C4-fix: the routing sequence lives in routeEnterpriseNewSessionToTarget
+   * (tested); these ports own the provider side. The empty-state intent refs
+   * are armed BEFORE the tab activates, so reopening the most recent project
+   * (tab closed or open-but-not-focused) can no longer race the landing
+   * invariant's transition into the project's latest conversation. */
   const routeEnterpriseNewSession = useCallback(async (): Promise<void> => {
-    const currentProjectId = getActiveProjectRaw()?.projectId ?? null
-    if (currentProjectId) {
-      landProjectEmptyState()
-      return
-    }
     const scope = productSpaceContext
     if (!scope || scope.activeProductSpace.kind !== 'enterprise') return
-    let projects: Array<{ id: string; name: string; myRole: 'owner' | 'manager' | 'member'; purpose?: string; instructions?: string; organizationProductSpaceId: string }> = []
-    try {
-      const response = await window.electronAPI.pmListProjects({
-        accountId: scope.accountId,
-        productSpaceId: scope.activeProductSpaceId,
-        organizationEnterpriseId: scope.activeProductSpace.enterpriseId,
-      })
-      projects = response.projects
-    } catch {
-      projects = []
-    }
-    const target = resolveChatEntryTarget({
-      spaceKind: 'enterprise',
-      activeTab: store.get(activeTabAtom),
-      recentProjectIds: readProjectVisitOrder(scope.accountId).map(record => record.productSpaceId),
-      visibleProjects: projects,
+    // Destructured post-narrowing: the ports' closures would lose the
+    // enterprise narrowing of scope.activeProductSpace.
+    const { accountId, activeProductSpaceId } = scope
+    const organizationEnterpriseId = scope.activeProductSpace.enterpriseId
+    await routeEnterpriseNewSessionToTarget({
+      getActiveProjectId: () => getActiveProjectRaw()?.projectId ?? null,
+      getActiveTab: () => store.get(activeTabAtom),
+      getRecentProjectIds: () => readProjectVisitOrder(accountId).map(record => record.productSpaceId),
+      listVisibleProjects: async () => {
+        try {
+          const response = await window.electronAPI.pmListProjects({
+            accountId,
+            productSpaceId: activeProductSpaceId,
+            organizationEnterpriseId,
+          })
+          return response.projects
+        } catch {
+          return []
+        }
+      },
+      abortToHome: () => {
+        store.set(activeTabIdAtom, HOME_TAB_ID)
+        toast.error(t('topbar.chatEntry.projectRequired'))
+      },
+      recordEmptyStateIntent: projectId => {
+        emptyIntentProjectIdRef.current = projectId
+        landedProjectIdRef.current = projectId
+      },
+      discardEmptyStateIntent: () => {
+        emptyIntentProjectIdRef.current = null
+        landedProjectIdRef.current = null
+      },
+      enterProject: candidate => enterProjectLightweight(accountId, candidate, store),
+      landEmptyState: landProjectEmptyState,
     })
-    const project = target.kind === 'project'
-      ? projects.find(candidate => candidate.id === target.projectId)
-      : undefined
-    if (!project) {
-      store.set(activeTabIdAtom, HOME_TAB_ID)
-      toast.error(t('topbar.chatEntry.projectRequired'))
-      return
-    }
-    await enterProjectLightweight(scope.accountId, {
-      id: project.id,
-      organizationEnterpriseId: scope.activeProductSpace.enterpriseId,
-      organizationProductSpaceId: project.organizationProductSpaceId,
-      name: project.name,
-      ...(project.purpose ? { purpose: project.purpose } : {}),
-      ...(project.instructions ? { instructions: project.instructions } : {}),
-      myRole: project.myRole,
-    }, store)
-    landProjectEmptyState()
   }, [landProjectEmptyState, productSpaceContext, store, t])
 
   // =========================================================================

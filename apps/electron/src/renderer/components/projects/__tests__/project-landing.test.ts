@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'bun:test'
-import { resolveChatEntryTarget, resolveProjectLanding, selectProjectSessionByProjectId, shouldLandProject } from '../enter-project'
+import {
+  resolveChatEntryTarget,
+  resolveProjectLanding,
+  routeEnterpriseNewSessionToTarget,
+  selectProjectSessionByProjectId,
+  shouldLandProject,
+  type EnterpriseChatEntryProject,
+} from '../enter-project'
 
 /**
  * POO-205 §10 (C3): the PROJECT LANDING resolver — NavigationProvider's
@@ -285,5 +292,119 @@ describe('resolveChatEntryTarget (C4 R4 chat-entry split)', () => {
       .toEqual({ kind: 'home-hint' })
     expect(resolve({ spaceKind: 'enterprise', activeTab: { type: 'home' }, recentProjectIds: ['proj-x'], visibleProjects: [{ id: 'proj-y' }] }))
       .toEqual({ kind: 'home-hint' })
+  })
+})
+
+// =============================================================================
+// POO-205 C4-fix: the enterprise「新建会话」routing as ONE atomic sequence.
+// The bug: from Home, ⌘N re-opened the most recent project and the landing
+// invariant's transition branch raced the empty-state navigation — the final
+// surface was the project's latest conversation instead of the empty state.
+// The fix: the empty-state intent is ARMED BEFORE the tab activates, so the
+// invariant sees the project as already landed (transition=false) no matter
+// when its effect flushes. The core's port ordering is the test surface:
+// record(:intent) must precede enter(:tab activation), land(:empty state)
+// must be the last navigation, and NO port ever creates a session.
+// =============================================================================
+describe('routeEnterpriseNewSessionToTarget (C4-fix atomic open + empty intent)', () => {
+  const directoryEntry = (id: string): EnterpriseChatEntryProject => ({
+    id,
+    name: `Project ${id}`,
+    organizationEnterpriseId: 'ent-1',
+    organizationProductSpaceId: 'space-a',
+    myRole: 'owner',
+  })
+
+  /** Recording harness: action ports append to `calls` in invocation order.
+   * `enterResult` simulates what enterProjectLightweight publishes (default:
+   * the project became active; null: the entry failed before publishing). */
+  async function drive(input: {
+    activeProjectId: string | null
+    activeTab: { type: string; project?: { projectId: string } } | null
+    recentProjectIds: ReadonlyArray<string>
+    visibleProjects: ReadonlyArray<string>
+    enterResult?: unknown
+  }) {
+    const calls: string[] = []
+    const outcome = await routeEnterpriseNewSessionToTarget({
+      getActiveProjectId: () => input.activeProjectId,
+      getActiveTab: () => input.activeTab,
+      getRecentProjectIds: () => input.recentProjectIds,
+      listVisibleProjects: async () => input.visibleProjects.map(directoryEntry),
+      abortToHome: () => calls.push('abort'),
+      recordEmptyStateIntent: projectId => calls.push(`record:${projectId}`),
+      discardEmptyStateIntent: () => calls.push('discard'),
+      enterProject: project => {
+        calls.push(`enter:${project.id}`)
+        // `??` would swallow a deliberate null (the failed-entry case) into
+        // the success fixture — branch on presence instead.
+        return Promise.resolve('enterResult' in input ? input.enterResult : { projectId: project.id })
+      },
+      landEmptyState: () => calls.push('land'),
+    })
+    return { calls, outcome }
+  }
+
+  it('(a) Home ⌘N, project tab CLOSED: intent armed BEFORE the tab opens — the invariant can never race the empty state', async () => {
+    const { calls, outcome } = await drive({
+      activeProjectId: null,
+      activeTab: { type: 'home' },
+      recentProjectIds: ['proj-a'],
+      visibleProjects: ['proj-a'],
+    })
+    expect(outcome).toBe('project-empty')
+    // record → enter → land, strictly: when the landing effect flushes on the
+    // activation it reads landedProjectIdRef === activeProjectId (transition
+    // false) and the intent armed → details=null survives (shouldLandProject
+    // C4 R3 cases above). The empty-state navigation is the LAST one.
+    expect(calls).toEqual(['record:proj-a', 'enter:proj-a', 'land'])
+  })
+
+  it('(b) Home ⌘N, project tab OPEN but not focused: same atomic arming through the focus-existing entry', async () => {
+    // openProjectTabAtom focus-existing branch (tab-browser.test.ts covers its
+    // activation) — from the routing core's seat the entry is identical, and
+    // the arming MUST precede it just the same.
+    const { calls, outcome } = await drive({
+      activeProjectId: null,
+      activeTab: { type: 'home' },
+      recentProjectIds: ['proj-b'],
+      visibleProjects: ['proj-a', 'proj-b'],
+    })
+    expect(outcome).toBe('project-empty')
+    expect(calls).toEqual(['record:proj-b', 'enter:proj-b', 'land'])
+  })
+
+  it('(c) project tab ALREADY active: land only — synchronous, no arming window, no entry', async () => {
+    const { calls, outcome } = await drive({
+      activeProjectId: 'proj-a',
+      activeTab: { type: 'project', project: { projectId: 'proj-a' } },
+      recentProjectIds: ['proj-a'],
+      visibleProjects: ['proj-a'],
+    })
+    expect(outcome).toBe('in-project-empty')
+    expect(calls).toEqual(['land'])
+  })
+
+  it('an entry that publishes nothing DISCARDS the armed intent (a later normal entry keeps its full landing)', async () => {
+    const { calls, outcome } = await drive({
+      activeProjectId: null,
+      activeTab: { type: 'home' },
+      recentProjectIds: ['proj-a'],
+      visibleProjects: ['proj-a'],
+      enterResult: null,
+    })
+    expect(outcome).toBe('project-empty')
+    expect(calls).toEqual(['record:proj-a', 'enter:proj-a', 'discard', 'land'])
+  })
+
+  it('no accessible project: Home + hint, nothing armed, nothing entered, no session', async () => {
+    const { calls, outcome } = await drive({
+      activeProjectId: null,
+      activeTab: { type: 'home' },
+      recentProjectIds: ['proj-gone'],
+      visibleProjects: [],
+    })
+    expect(outcome).toBe('home-hint')
+    expect(calls).toEqual(['abort'])
   })
 })
