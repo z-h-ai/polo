@@ -174,7 +174,7 @@ jobs:
         run: |
           ok=""
           for i in 1 2 3 4 5; do
-            if sudo apt-get update && sudo apt-get install -y --fix-missing libfuse2 xvfb; then ok=1; break; fi
+            if timeout 480 sudo apt-get update && timeout 480 sudo apt-get install -y --fix-missing libfuse2 xvfb; then ok=1; break; fi
             echo "::warning::apt attempt ${i} failed; retrying with fallback mirror"
             sudo sed -i 's/azure\.archive\.ubuntu\.com/archive.ubuntu.com/g' /etc/apt/apt-mirrors.txt
             sleep 15
