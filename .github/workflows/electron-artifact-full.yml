@@ -172,8 +172,14 @@ jobs:
       - name: Install Linux GUI dependencies
         if: matrix.platform == 'linux'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libfuse2 xvfb
+          ok=""
+          for i in 1 2 3 4 5; do
+            if sudo apt-get update && sudo apt-get install -y --fix-missing libfuse2 xvfb; then ok=1; break; fi
+            echo "::warning::apt attempt ${i} failed; retrying with fallback mirror"
+            sudo sed -i 's/azure\.archive\.ubuntu\.com/archive.ubuntu.com/g' /etc/apt/apt-mirrors.txt
+            sleep 15
+          done
+          test -n "$ok" || { echo "apt failed after retries"; exit 100; }
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
