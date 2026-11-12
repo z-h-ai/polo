@@ -7,17 +7,19 @@ import { createElement } from 'react'
 import type { SidebarItem } from '../LeftSidebar'
 
 /**
- * POO-205 C8 (R7/R8) — the ENTERPRISE project tab's sidebar identity and its
- * two hosted surfaces, isolated happy-dom render. Proven contracts:
+ * POO-205 C8 (R7/R8), trimmed by POO-208 — the ENTERPRISE project tab's
+ * sidebar identity and its settings dialog, isolated happy-dom render.
+ * Proven contracts:
  *
  * - the sidebar TRIM is the whitelist {allSessions, labels}; sources / skills
  *   / automations / assistant settings (workspace-global rows) never survive
  *   it, and the gate answers FALSE for a personal space on a project tab —
  *   the personal sidebar is untouched (the反例);
- * - the header carries the project identity (name + one-line purpose), the
- *   members entry (roster avatars + the SERVER count) and the settings gear —
- *   and NO「新建会话」button (POO-207: the navigator header owns new-session);
- * - the members entry opens the shared members PANEL (drawer form);
+ * - the header carries the project identity (name + one-line purpose) and the
+ *   settings gear — and NO「新建会话」button (POO-207: the navigator header
+ *   owns new-session);
+ * - POO-208: NO members entry — the chat header is the single members home;
+ *   the sidebar hosts no members PANEL;
  * - the settings dialog: per-field length counters, a success toast, PATCH
  *   semantics (only changed fields travel), pm wire codes surfaced through
  *   the shared mapping — and a MEMBER sees the READ-ONLY face with the full
@@ -189,14 +191,15 @@ describe('projectTabSidebarItems (C8 R7 whitelist trim)', () => {
 // Part B — the header render
 // =============================================================================
 
-describe('ProjectTabSidebar header (C8 R7)', () => {
-  it('carries the project identity, the members entry with the SERVER count and the gear — no「新建会话」', async () => {
-    await renderSidebar()
+describe('ProjectTabSidebar header (C8 R7, POO-208 trim)', () => {
+  it('carries the project identity and the gear — no「新建会话」, no members entry', async () => {
+    const { harness } = await renderSidebar()
     await waitFor(() => expect(screen.getByTestId('project-tab-name').textContent).toBe('华东区资料库'))
     expect(screen.getByTestId('project-tab-purpose').textContent).toBe('区域销售资料与口径')
-    // The roster speaks: the count is what the server sent (2 members), and
-    // the avatars ride the shared entry label.
-    await waitFor(() => expect(screen.getByTestId('project-tab-members-entry').textContent).toContain('成员 2'))
+    // POO-208: the sidebar lost its members row — the chat header is the
+    // single members entry. No row, no hosted PANEL.
+    expect(screen.queryByTestId('project-tab-members-entry')).toBeNull()
+    expect(screen.queryByTestId('project-members-panel')).toBeNull()
     expect(screen.getByTestId('project-tab-settings').getAttribute('aria-label')).toBe('项目设置')
     // POO-207: the duplicate is gone — the navigator (session list) header
     // has owned new-session since POO-202.
@@ -206,21 +209,15 @@ describe('ProjectTabSidebar header (C8 R7)', () => {
     expect(screen.queryByTestId('nav:skills')).toBeNull()
     expect(screen.queryByTestId('nav:automations')).toBeNull()
     expect(screen.queryByTestId('nav:settings')).toBeNull()
+    // The roster hook still speaks: the settings dialog reads the SERVER
+    // count through it (2 members read from the wire).
+    await waitFor(() => expect(harness.listCalls).toHaveLength(1))
   })
 
   it('a project without a purpose renders the name alone (no empty purpose line)', async () => {
     await renderSidebar({ project: activeProject({ purpose: undefined }) })
     await waitFor(() => expect(screen.getByTestId('project-tab-name').textContent).toBe('华东区资料库'))
     expect(screen.queryByTestId('project-tab-purpose')).toBeNull()
-  })
-
-  it('the members entry opens the shared members PANEL in the drawer form', async () => {
-    await renderSidebar()
-    await waitFor(() => expect(screen.getByTestId('project-tab-members-entry').textContent).toContain('成员 2'))
-    fireEvent.click(screen.getByTestId('project-tab-members-entry'))
-    const panel = await screen.findByTestId('project-members-panel')
-    expect(panel.getAttribute('data-mode')).toBe('drawer')
-    expect(screen.getByTestId('project-members-title').textContent).toBe('华东区资料库')
   })
 })
 
