@@ -306,6 +306,23 @@ jobs:
               exit 1
             fi
           done
+      # v0.30.2 postmortem: polo-release-pull refuses a pull when the projected
+      # peak usage of the releases volume exceeds 70% (MAX_DISK_USAGE), and that
+      # refusal landed 30 minutes into the production job after all four builds
+      # had already succeeded. Probe the same filesystem up front (read-only)
+      # so the run fails in seconds with the remediation that actually worked
+      # (docker builder prune on the updates server).
+      - name: Check updates server disk headroom before pulling the release
+        shell: bash
+        run: |
+          set -euo pipefail
+          df_line="$(bash scripts/updates-server-exec.sh sh -c 'df -P /data/releases | tail -1')"
+          used_pct="$(awk '{print $5}' <<<"$df_line" | tr -d '%')"
+          echo "releases volume use: ${used_pct}% (publisher refuses pulls at >=70%)"
+          if [ "${used_pct}" -ge 70 ]; then
+            echo "::error::Updates server releases volume is at ${used_pct}% (limit 70%; polo-release-pull would cancel the pull after the builds). Free space on the updates server first — docker builder prune -f and docker image prune -f (never prune newapi:*/newapi-rollback:*/updates-static:*/updates-static-rollback:* images) — then re-run this release."
+            exit 1
+          fi
       # POL-268: the tag workflow runs /app scripts baked into the deployed
       # updates-static image. A publisher predating the dual-architecture
       # contract would reject the ten-asset Draft only after the release had
