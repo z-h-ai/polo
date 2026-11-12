@@ -494,7 +494,7 @@
   "chatInput.placeholder.labels": "# eingeben, um Labels auf diese Unterhaltung anzuwenden",
   "chatInput.placeholder.mention": "@ eingeben, um Dateien, Ordner oder Skills zu erwähnen",
   "chatInput.placeholder.newLine": "Shift + Return für eine neue Zeile drücken",
-  "chatInput.placeholder.shiftTab": "Shift + Tab verwenden, um zwischen Erkunden und Ausführen zu wechseln",
+  "chatInput.placeholder.shiftTab": "Shift + Tab verwenden, um zwischen Erkunden, Fragen und Ausführen zu wechseln",
   "chatInput.placeholder.sidebar": "{{key}} + B drücken, um die Seitenleiste ein-/auszublenden",
   "chatInput.placeholder.typeMessage": "Nachricht eingeben...",
   "chatInput.placeholder.workOn": "Woran möchten Sie arbeiten?",

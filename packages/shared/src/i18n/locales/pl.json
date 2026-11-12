@@ -500,7 +500,7 @@
   "chatInput.placeholder.labels": "Wpisz #, aby dodać etykiety do tej rozmowy",
   "chatInput.placeholder.mention": "Wpisz @, aby wskazać pliki, foldery lub umiejętności",
   "chatInput.placeholder.newLine": "Naciśnij Shift + Return, aby dodać nowy wiersz",
-  "chatInput.placeholder.shiftTab": "Użyj Shift + Tab, aby przełączać między trybem Eksploruj a Wykonuj",
+  "chatInput.placeholder.shiftTab": "Użyj Shift + Tab, aby przełączać między trybami Eksploruj, Pytaj i Wykonuj",
   "chatInput.placeholder.sidebar": "Naciśnij {{key}} + B, aby przełączyć pasek boczny",
   "chatInput.placeholder.typeMessage": "Napisz wiadomość...",
   "chatInput.placeholder.workOn": "Nad czym chcesz pracować?",
