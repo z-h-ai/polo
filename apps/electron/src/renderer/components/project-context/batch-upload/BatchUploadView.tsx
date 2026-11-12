@@ -13,7 +13,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { formatAssetBytes } from '../asset-upload-prep'
-import { uploadTagCaption } from '../AssetUploadDialog'
+import { formatElapsedSeconds, uploadTagCaption, useElapsedSeconds } from '../AssetUploadDialog'
 import type { BatchUploadController, BatchUploadEntry } from './useBatchUpload'
 
 /**
@@ -45,6 +45,17 @@ function EntryStatusBadge({ entry }: { entry: BatchUploadEntry }) {
   if (entry.status === 'failed') {
     return <Icons.X className="h-3.5 w-3.5 text-destructive" aria-hidden="true" data-testid="pc-batch-entry-status" data-status="failed" />
   }
+  // A cancel is the user's own stop — neutral face, never the failure ✗.
+  if (entry.status === 'cancelled') {
+    return (
+      <Icons.CircleSlash
+        className="h-3.5 w-3.5 text-muted-foreground"
+        aria-label={t('projectContext.upload.batch.cancelled')}
+        data-testid="pc-batch-entry-status"
+        data-status="cancelled"
+      />
+    )
+  }
   return (
     <span
       className="inline-block h-2 w-2 rounded-full border border-border"
@@ -67,7 +78,7 @@ export function BatchUploadView({ controller, onBack, onClose }: BatchUploadView
   const {
     phase, sourceKind, sourceLabel, entries, truncated, defaultedDown, scanning,
     batchTags, sourceNote, uploading, settled,
-    selectedCount, selectedBytes, doneCount, failedCount,
+    selectedCount, selectedBytes, doneCount, failedCount, cancelledCount,
     toggleEntry, toggleAllCheckable, renameEntry, setBatchTags, setSourceNote,
     startUpload, cancelUpload, retryFailed,
   } = controller
@@ -119,6 +130,9 @@ export function BatchUploadView({ controller, onBack, onClose }: BatchUploadView
   const visibleEntries = entries.slice(0, PC_BATCH_VIEW_RENDER_MAX)
   const hiddenCount = entries.length - visibleEntries.length
   const canStart = selectedCount > 0 && !uploading
+  // The batch upload is a serial queue of single RPCs with no wire progress —
+  // the ticking clock is what tells 「慢」 from 「卡死」.
+  const uploadElapsed = useElapsedSeconds(uploading)
 
   if (scanning) {
     return (
@@ -246,6 +260,11 @@ export function BatchUploadView({ controller, onBack, onClose }: BatchUploadView
                     {t(entry.errorKey)}
                   </span>
                 )}
+                {entry.status === 'cancelled' && (
+                  <span className="text-[11px] text-muted-foreground" data-testid="pc-batch-entry-cancelled">
+                    {t('projectContext.upload.batch.cancelled')}
+                  </span>
+                )}
               </div>
               <span className="shrink-0 text-[11px] text-muted-foreground" data-testid="pc-batch-entry-size">
                 {entry.sizeBytes === null ? '—' : formatAssetBytes(t, entry.sizeBytes)}
@@ -320,9 +339,27 @@ export function BatchUploadView({ controller, onBack, onClose }: BatchUploadView
 
       {/* Footer: phase-specific actions */}
       <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0 text-[12px] text-muted-foreground" role="status" data-testid="pc-batch-progress">
-          {uploading && t('projectContext.upload.batch.progress', { done: doneCount, total: doneCount + selectedCount })}
-          {settled && t('projectContext.upload.batch.settled', { succeeded: doneCount - failedCount, failed: failedCount })}
+        <div className="flex min-w-0 items-center gap-2 text-[12px] text-muted-foreground" role="status" data-testid="pc-batch-progress">
+          {uploading && (
+            <>
+              <Icons.Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />
+              <span className="truncate">
+                {t('projectContext.upload.batch.progress', { done: doneCount, total: doneCount + selectedCount })}
+              </span>
+              {uploadElapsed > 0 && (
+                <span className="shrink-0 tabular-nums">
+                  {t('projectContext.upload.elapsed', { time: formatElapsedSeconds(uploadElapsed) })}
+                </span>
+              )}
+            </>
+          )}
+          {settled && (
+            <span className="truncate">
+              {cancelledCount > 0
+                ? t('projectContext.upload.batch.settledCancelled', { succeeded: doneCount - failedCount, failed: failedCount, cancelled: cancelledCount })
+                : t('projectContext.upload.batch.settled', { succeeded: doneCount - failedCount, failed: failedCount })}
+            </span>
+          )}
         </div>
         <div className="flex shrink-0 gap-2">
           {uploading && (

@@ -27,7 +27,6 @@ import {
 } from '@/components/ui/client-workbench'
 import { cn } from '@/lib/utils'
 import {
-  AssetUploadPrepError,
   formatAssetBytes,
   mimeFromName,
   prepareAssetUploadFile,
@@ -125,6 +124,14 @@ function targetSignature(target: ShareToProjectTarget): string {
   ])
 }
 
+/** One per-item publish failure: named at render time via the shared
+ * pc_* → copy table, kept as a KEY so a language switch re-renders it. */
+interface ShareFailure {
+  id: string
+  name: string
+  reasonKey: string
+}
+
 export function ShareToProjectDialog({
   open,
   scope,
@@ -149,6 +156,13 @@ export function ShareToProjectDialog({
   const [preparing, setPreparing] = React.useState(false)
   const [submitting, setSubmitting] = React.useState(false)
   const [errorText, setErrorText] = React.useState<string | null>(null)
+  /** Items that failed in the last run; the earlier publishes stay intact. */
+  const [failures, setFailures] = React.useState<ShareFailure[]>([])
+  /** How many items landed across ALL runs of this dialog (for the summary). */
+  const [sharedCount, setSharedCount] = React.useState(0)
+  // Publishes accumulate across retry runs so the parent's success callback
+  // always reports EVERYTHING this dialog landed, never just the last try.
+  const publishedRef = React.useRef<PcAssetDto[]>([])
 
   // X1-style guard: the synchronous ref answers Esc while React batches state.
   const submittingRef = React.useRef(false)
@@ -179,6 +193,9 @@ export function ShareToProjectDialog({
     setCustomTag('')
     setTagErrorKey(null)
     setErrorText(null)
+    setFailures([])
+    setSharedCount(0)
+    publishedRef.current = []
     setSourceNote(target.sessionTitle
       ? t('projectContext.share.sourceNote', { title: target.sessionTitle }).slice(0, 512)
       : '')
@@ -265,11 +282,12 @@ export function ShareToProjectDialog({
     submittingRef.current = true
     setSubmitting(true)
     setErrorText(null)
-    const published: PcAssetDto[] = []
     try {
-      // One asset per selected item; a failure stops the loop with the item
-      // named so the user can drop it and share the rest instead of losing
-      // the whole batch.
+      // One asset per selected item; a failure no longer stops the run — the
+      // rest complete, then the failures are listed with a 「重试失败项」 exit
+      // (the selection narrows to exactly the failed items, so a retry never
+      // re-publishes what already landed).
+      const runFailures: ShareFailure[] = []
       for (const item of selectedItems) {
         try {
           let filePath = item.storedPath
@@ -301,24 +319,32 @@ export function ShareToProjectDialog({
             mime: prepared.mime,
             checksumSha256: prepared.digestSha256,
           })
-          published.push(result.asset)
+          publishedRef.current.push(result.asset)
         } catch (error) {
-          const reason = t(projectContextUploadErrorKey(error))
-          throw new Error(
-            error instanceof AssetUploadPrepError
-              ? reason
-              : t('projectContext.share.itemFailed', { name: (names[item.id] ?? item.name).trim(), reason }),
-          )
+          runFailures.push({
+            id: item.id,
+            name: (names[item.id] ?? item.name).trim(),
+            reasonKey: projectContextUploadErrorKey(error),
+          })
         }
       }
-      onShared(published)
+      if (runFailures.length === 0) {
+        const published = publishedRef.current
+        publishedRef.current = []
+        setFailures([])
+        onShared(published)
+      } else {
+        setFailures(runFailures)
+        setSharedCount(publishedRef.current.length)
+        setSelected(runFailures.map((failure) => failure.id))
+      }
     } catch (error) {
       setErrorText(error instanceof Error ? error.message : String(error))
     } finally {
       submittingRef.current = false
       setSubmitting(false)
     }
-  }, [canSubmit, selectedItems, sessionId, names, maxUploadBytes, scope.workspaceId, scope.productSpaceId, tags, sourceNote, onShared, t])
+  }, [canSubmit, selectedItems, sessionId, names, maxUploadBytes, scope.workspaceId, scope.productSpaceId, tags, sourceNote, onShared])
 
   // A draft ask: selection, tags or the source note the user touched.
   const requestDiscardConfirm = React.useCallback(() => {
@@ -486,6 +512,22 @@ export function ShareToProjectDialog({
                     {errorText}
                   </p>
                 )}
+                {failures.length > 0 && (
+                  <div
+                    className="flex flex-col gap-1 rounded-[10px] border border-destructive/25 bg-destructive/10 px-3 py-2"
+                    role="alert"
+                    data-testid="pc-share-failures"
+                  >
+                    <span className="text-[12px] font-medium text-destructive">
+                      {t('projectContext.share.partialFailed', { shared: sharedCount, failed: failures.length })}
+                    </span>
+                    {failures.map((failure) => (
+                      <span key={failure.id} className="text-[12px] text-destructive" data-testid="pc-share-failure-item">
+                        {t('projectContext.share.itemFailed', { name: failure.name, reason: t(failure.reasonKey) })}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 {submitting && (
                   <p className="text-[12px] text-muted-foreground" role="status" data-testid="pc-share-submitting">
                     {t('projectContext.share.submitting')}
@@ -510,7 +552,9 @@ export function ShareToProjectDialog({
                   >
                     {submitting
                       ? t('projectContext.share.submitting')
-                      : t('projectContext.share.submit')}
+                      : failures.length > 0
+                        ? t('projectContext.share.retryFailed', { count: failures.length })
+                        : t('projectContext.share.submit')}
                   </Button>
                 </div>
               </>

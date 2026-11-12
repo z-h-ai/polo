@@ -30,6 +30,7 @@ import {
   AssetUploadPrepError,
   formatAssetBytes,
   prepareAssetUploadFile,
+  type AssetUploadPrepPhase,
   type PreparedAssetUpload,
 } from './asset-upload-prep'
 import { projectContextErrorKey, type PcScope } from './useProjectAssets'
@@ -102,6 +103,33 @@ export function uploadTagCaption(tag: string, t: (key: string) => string): strin
     : tag
 }
 
+/** Locale-neutral m:ss rendering for the staged upload feedback. */
+export function formatElapsedSeconds(seconds: number): string {
+  const minutes = Math.floor(seconds / 60)
+  const secs = seconds % 60
+  return `${minutes}:${String(secs).padStart(2, '0')}`
+}
+
+/**
+ * Seconds since `active` turned true (reset on every re-activation). The
+ * upload RPC has NO progress events (a single request/response call), so a
+ * ticking clock plus the stage label is the honest feedback a beginner needs
+ * to tell 「慢」 from 「卡死」 — shared by the single form and the batch view.
+ */
+export function useElapsedSeconds(active: boolean): number {
+  const [seconds, setSeconds] = React.useState(0)
+  React.useEffect(() => {
+    if (!active) return
+    const startedAt = Date.now()
+    setSeconds(0)
+    const timer = window.setInterval(() => {
+      setSeconds(Math.floor((Date.now() - startedAt) / 1000))
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [active])
+  return seconds
+}
+
 /**
  * The shared pick → digest → fields form. Both create and replace dialogs
  * render this; only the submit write and copy differ.
@@ -154,6 +182,8 @@ export function AssetUploadForm({
   const { t } = useTranslation()
   const [picked, setPicked] = React.useState<PreparedAssetUpload | null>(null)
   const [preparing, setPreparing] = React.useState(false)
+  /** Which prep stage is running (read → digest) for the staged feedback. */
+  const [prepPhase, setPrepPhase] = React.useState<AssetUploadPrepPhase>('reading')
   const [submitting, setSubmitting] = React.useState(false)
   const [errorKey, setErrorKey] = React.useState<string | null>(null)
   const [name, setName] = React.useState(initialName ?? '')
@@ -161,6 +191,11 @@ export function AssetUploadForm({
   const [customTag, setCustomTag] = React.useState('')
   const [tagErrorKey, setTagErrorKey] = React.useState<string | null>(null)
   const [sourceNote, setSourceNote] = React.useState('')
+  // The integrity digest is noise for a beginner: folded to a preview until
+  // asked for (consensus: 防错优于报错 applies to visual noise too).
+  const [digestRevealed, setDigestRevealed] = React.useState(false)
+  const [digestCopied, setDigestCopied] = React.useState(false)
+  const digestCopiedTimerRef = React.useRef<number | null>(null)
 
   // E-1: the state flag alone cannot stop a double click (React batches it),
   // so the write is also guarded by a ref that flips SYNCHRONOUSLY.
@@ -170,6 +205,7 @@ export function AssetUploadForm({
   React.useEffect(() => () => {
     // A gone dialog must not keep hashing a file nobody will upload.
     prepAbortRef.current?.abort()
+    if (digestCopiedTimerRef.current !== null) window.clearTimeout(digestCopiedTimerRef.current)
   }, [])
 
   const ingestPath = React.useCallback(async (filePath: string) => {
@@ -177,9 +213,15 @@ export function AssetUploadForm({
     const controller = new AbortController()
     prepAbortRef.current = controller
     setPreparing(true)
+    setPrepPhase('reading')
     setErrorKey(null)
+    setDigestRevealed(false)
+    setDigestCopied(false)
     try {
-      const prepared = await prepareAssetUploadFile(filePath, maxUploadBytes, { signal: controller.signal })
+      const prepared = await prepareAssetUploadFile(filePath, maxUploadBytes, {
+        signal: controller.signal,
+        onPhase: setPrepPhase,
+      })
       if (controller.signal.aborted) return
       setPicked(prepared)
       setName(initialName ?? prepared.name)
@@ -253,7 +295,23 @@ export function AssetUploadForm({
     setTagErrorKey(null)
   }, [])
 
+  const copyDigest = React.useCallback(async () => {
+    if (!picked) return
+    try {
+      await navigator.clipboard.writeText(picked.digestSha256)
+      setDigestCopied(true)
+      if (digestCopiedTimerRef.current !== null) window.clearTimeout(digestCopiedTimerRef.current)
+      digestCopiedTimerRef.current = window.setTimeout(() => {
+        setDigestCopied(false)
+        digestCopiedTimerRef.current = null
+      }, 2000)
+    } catch {
+      // Clipboard unavailable: the reveal toggle keeps the value selectable.
+    }
+  }, [picked])
+
   const canSubmit = !!picked && name.trim().length > 0 && !preparing && !submitting
+  const busyElapsed = useElapsedSeconds(preparing || submitting)
 
   const handleSubmit = React.useCallback(async () => {
     if (submittingRef.current) return
@@ -326,15 +384,53 @@ export function AssetUploadForm({
             {formatAssetBytes(t, picked.sizeBytes)}
           </dd>
           <dt className="text-muted-foreground">{t('projectContext.upload.digest')}</dt>
-          <dd className="truncate font-mono text-foreground-80" title={picked.digestSha256} data-testid={`${testIdPrefix}-digest`}>
-            {picked.digestSha256}
+          <dd className="flex min-w-0 items-start gap-1 font-mono text-foreground-80" data-testid={`${testIdPrefix}-digest`}>
+            <span className={cn('min-w-0 flex-1', digestRevealed ? 'break-all' : 'truncate')}>
+              {digestRevealed ? picked.digestSha256 : `${picked.digestSha256.slice(0, 12)}…`}
+            </span>
+            <button
+              type="button"
+              className="mt-px shrink-0 rounded-sm p-0.5 text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+              aria-label={t(digestRevealed ? 'projectContext.upload.digestHide' : 'projectContext.upload.digestShow')}
+              title={t(digestRevealed ? 'projectContext.upload.digestHide' : 'projectContext.upload.digestShow')}
+              onClick={() => setDigestRevealed((value) => !value)}
+              data-testid={`${testIdPrefix}-digest-toggle`}
+            >
+              {digestRevealed
+                ? <Icons.EyeOff className="h-3.5 w-3.5" aria-hidden="true" />
+                : <Icons.Eye className="h-3.5 w-3.5" aria-hidden="true" />}
+            </button>
+            <button
+              type="button"
+              className="mt-px shrink-0 rounded-sm p-0.5 text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+              aria-label={t('projectContext.upload.digestCopy')}
+              title={t('projectContext.upload.digestCopy')}
+              onClick={() => void copyDigest()}
+              data-testid={`${testIdPrefix}-digest-copy`}
+            >
+              {digestCopied
+                ? <Icons.Check className="h-3.5 w-3.5 text-emerald-600" aria-hidden="true" />
+                : <Icons.Copy className="h-3.5 w-3.5" aria-hidden="true" />}
+            </button>
           </dd>
         </dl>
       )}
       {preparing && (
-        <p className="text-[12px] text-muted-foreground" role="status" data-testid={`${testIdPrefix}-preparing`}>
-          {t('projectContext.upload.preparing')}
-        </p>
+        <div
+          className="flex items-center gap-2 text-[12px] text-muted-foreground"
+          role="status"
+          data-testid={`${testIdPrefix}-preparing`}
+        >
+          <Icons.Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />
+          <span>
+            {t(prepPhase === 'verifying' ? 'projectContext.upload.verifying' : 'projectContext.upload.preparing')}
+          </span>
+          {busyElapsed > 0 && (
+            <span className="shrink-0 tabular-nums">
+              {t('projectContext.upload.elapsed', { time: formatElapsedSeconds(busyElapsed) })}
+            </span>
+          )}
+        </div>
       )}
 
       <label className="flex flex-col gap-1">
@@ -434,9 +530,22 @@ export function AssetUploadForm({
         </p>
       )}
       {submitting && (
-        <p className="text-[12px] text-muted-foreground" role="status" data-testid={`${testIdPrefix}-submitting-note`}>
-          {t('projectContext.upload.submittingNote')}
-        </p>
+        <div
+          className="flex flex-col gap-0.5 text-[12px] text-muted-foreground"
+          role="status"
+          data-testid={`${testIdPrefix}-submitting-note`}
+        >
+          <span className="flex items-center gap-2">
+            <Icons.Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />
+            <span>{t('projectContext.upload.submitting')}</span>
+            {busyElapsed > 0 && (
+              <span className="shrink-0 tabular-nums">
+                {t('projectContext.upload.elapsed', { time: formatElapsedSeconds(busyElapsed) })}
+              </span>
+            )}
+          </span>
+          <span>{t('projectContext.upload.submittingNote')}</span>
+        </div>
       )}
 
       <div className="flex justify-end gap-2">
@@ -573,6 +682,112 @@ export function AssetUploadDialog({
     setBatchMode(false)
   }, [])
 
+  /* ---- Drag & drop entry (same routing as the three pick buttons) ---- */
+
+  const [dragActive, setDragActive] = React.useState(false)
+  const dragDepthRef = React.useRef(0)
+  // A drop must never re-route a write that is already talking to the wire.
+  const dropBlocked = formState.submitting || batch.uploading || batch.scanning
+
+  React.useEffect(() => {
+    if (open) return
+    setDragActive(false)
+    dragDepthRef.current = 0
+  }, [open])
+
+  /** Routes one drop through the SAME decision tree as pickSmart/pickFolder/
+   * pickZip: one folder → folder scan, one zip → unpack staging, one plain
+   * file → the single form, several files → the batch checklist. Folder
+   * detection uses dataTransfer.items (webkitGetAsEntry) exactly like the
+   * chat composer's drop — and must run SYNCHRONOUSLY in the drop handler,
+   * before any await invalidates the items. */
+  const ingestDrop = React.useCallback(async (dataTransfer: DataTransfer) => {
+    setBatchErrorKey(null)
+    const dirPaths: string[] = []
+    const filePaths: string[] = []
+    for (const item of Array.from(dataTransfer.items)) {
+      if (item.kind !== 'file') continue
+      const entry = (item as unknown as {
+        webkitGetAsEntry?: () => { isDirectory: boolean } | null
+      }).webkitGetAsEntry?.()
+      const file = item.getAsFile()
+      const path = file ? (window.electronAPI.getFilePath?.(file) ?? null) : null
+      if (!path) continue
+      if (entry?.isDirectory) dirPaths.push(path)
+      else filePaths.push(path)
+    }
+    if (dirPaths.length > 0) {
+      if (!batchAvailable || dirPaths.length > 1 || filePaths.length > 0) {
+        // Refuse loudly instead of scanning an arbitrary subset.
+        setBatchErrorKey('projectContext.upload.dropOneFolder')
+        return
+      }
+      try {
+        setBatchMode(true)
+        await batch.beginFolderBatch(dirPaths[0]!)
+      } catch (error) {
+        setBatchMode(false)
+        setBatchErrorKey(projectContextUploadErrorKey(error))
+      }
+      return
+    }
+    if (filePaths.length === 0) return
+    if (!batchAvailable) {
+      // The single-file form (no batch capability): one file ingests, more is
+      // a clear refusal — never a silent partial pick.
+      if (filePaths.length > 1) {
+        setBatchErrorKey('projectContext.upload.dropSingleOnly')
+        return
+      }
+      setSinglePickPath(filePaths[0]!)
+      return
+    }
+    if (filePaths.length === 1 && looksLikeZipPath(filePaths[0]!)) {
+      try {
+        setBatchMode(true)
+        await batch.beginZipBatch(filePaths[0]!)
+      } catch (error) {
+        setBatchMode(false)
+        setBatchErrorKey(projectContextUploadErrorKey(error))
+      }
+      return
+    }
+    if (filePaths.length === 1) {
+      setSinglePickPath(filePaths[0]!)
+      return
+    }
+    batch.beginFilesBatch(filePaths)
+    setBatchMode(true)
+  }, [batch, batchAvailable])
+
+  const handleDragEnter = React.useCallback((event: React.DragEvent) => {
+    event.preventDefault()
+    if (!event.dataTransfer.types.includes('Files')) return
+    dragDepthRef.current += 1
+    if (!dropBlocked) setDragActive(true)
+  }, [dropBlocked])
+
+  const handleDragOver = React.useCallback((event: React.DragEvent) => {
+    event.preventDefault()
+  }, [])
+
+  const handleDragLeave = React.useCallback((event: React.DragEvent) => {
+    event.preventDefault()
+    dragDepthRef.current -= 1
+    if (dragDepthRef.current <= 0) {
+      dragDepthRef.current = 0
+      setDragActive(false)
+    }
+  }, [])
+
+  const handleDrop = React.useCallback((event: React.DragEvent) => {
+    event.preventDefault()
+    dragDepthRef.current = 0
+    setDragActive(false)
+    if (dropBlocked) return
+    void ingestDrop(event.dataTransfer)
+  }, [dropBlocked, ingestDrop])
+
   /* ---- The three batch entries (D4) ---- */
 
   const pickSmart = React.useCallback(async () => {
@@ -648,8 +863,23 @@ export function AssetUploadDialog({
           onEscapeKeyDown={(event) => { if (formState.submitting) event.preventDefault() }}
           onInteractOutside={(event) => { if (formState.submitting) event.preventDefault() }}
           showCloseButton={!formState.submitting}
+          onDragEnter={handleDragEnter}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
           data-testid="pc-upload-dialog"
         >
+          {dragActive && (
+            <div
+              className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-[inherit] border-2 border-dashed border-accent bg-background/80"
+              data-testid="pc-upload-drop-overlay"
+            >
+              <span className="flex items-center gap-2 text-[13px] font-medium text-accent">
+                <Icons.FileUp className="h-4 w-4" aria-hidden="true" />
+                {t('projectContext.upload.dropHint')}
+              </span>
+            </div>
+          )}
           <DialogHeader>
             <DialogTitle>{t(batchActive ? 'projectContext.upload.batch.title' : 'projectContext.upload.title')}</DialogTitle>
             <DialogDescription>

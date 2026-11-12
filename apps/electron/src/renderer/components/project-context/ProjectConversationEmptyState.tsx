@@ -435,6 +435,7 @@ export function ProjectConversationEmptyState({
                 scope={{ workspaceId, productSpaceId, projectId: projectScope!.projectId }}
                 active={projectTab !== 'files'}
                 onChanged={() => {}}
+                onOpenFiles={() => setProjectTab('files')}
               />
             </div>
           </>
