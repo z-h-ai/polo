@@ -1279,6 +1279,7 @@
   "menu.cut": "Wytnij",
   "menu.debug": "Debug",
   "menu.edit": "Edycja",
+  "menu.exitFocusMode": "Zamknij tryb skupienia",
   "menu.file": "Plik",
   "menu.forceReload": "Wymuś przeładowanie",
   "menu.help": "Pomoc",
