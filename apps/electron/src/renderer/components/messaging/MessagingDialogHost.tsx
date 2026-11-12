@@ -18,6 +18,7 @@ import { toast } from 'sonner'
 import { messagingDialogAtom } from '@/atoms/messaging'
 import { PairingCodeDialog } from './PairingCodeDialog'
 import { WhatsAppConnectDialog } from './WhatsAppConnectDialog'
+import { classifyMessagingError } from './MessagingSessionMenuItem'
 
 export function MessagingDialogHost() {
   const [state, setState] = useAtom(messagingDialogAtom)
@@ -81,7 +82,9 @@ export function MessagingDialogHost() {
         sessionId,
         code: null,
         expiresAt: null,
-        error: classifyMessagingError(err),
+        // Localized known-failure copy / generic retry suggestion; the raw
+        // diagnostic stays in the console (see classifyMessagingError).
+        error: classifyMessagingError(err, t),
       })
     }
   }
@@ -112,15 +115,4 @@ export function MessagingDialogHost() {
       />
     </>
   )
-}
-
-function classifyMessagingError(err: unknown): string {
-  const msg = err instanceof Error ? err.message : String(err)
-  if (/not connected/i.test(msg)) {
-    return 'WhatsApp is not connected yet. Reconnect it in Settings → Messaging and try again.'
-  }
-  if (/rate.?limit/i.test(msg)) {
-    return 'Too many pairing code requests. Please wait a moment and try again.'
-  }
-  return msg
 }

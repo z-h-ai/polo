@@ -2744,7 +2744,7 @@ function AppShellContent({
                               }}
                               className="text-xs text-muted-foreground hover:text-foreground"
                             >
-                              Clear
+                              {t("common.clear")}
                             </button>
                           )}
                         </div>

@@ -143,8 +143,10 @@ export function MessagingSessionMenuItem(props: MessagingSessionMenuItemProps) {
 
 /**
  * Translate raw errors from the pairing-code RPC into user-facing text.
- * Narrow on purpose — only classifies well-known failure modes; anything else
- * is surfaced verbatim so real errors aren't hidden.
+ * Narrow on purpose — only classifies well-known failure modes into
+ * localized copy; anything unknown degrades to a generic retry suggestion
+ * (the raw diagnostic stays in the console) so technical English text never
+ * reaches the dialog.
  */
 export function classifyMessagingError(err: unknown, t: TFunction): string {
   const msg = err instanceof Error ? err.message : String(err)
@@ -154,5 +156,6 @@ export function classifyMessagingError(err: unknown, t: TFunction): string {
   if (/rate.?limit/i.test(msg)) {
     return t('toast.messagingRateLimited')
   }
-  return msg
+  console.error('[MessagingSessionMenuItem] pairing code failed:', err)
+  return t('dialog.pairingCode.error.generic')
 }
