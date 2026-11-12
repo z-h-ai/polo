@@ -2582,7 +2582,10 @@ export default function App() {
             messages: [...s.messages, {
               id: generateMessageId(),
               role: 'warning' as const,
-              content: `⚠️ ${failedCount} attachment(s) could not be stored and will not be sent: ${failedNames}`,
+              // i18n warning card copy ({{count}}/{{names}} interpolation);
+              // the Info-themed bubble in ChatDisplay already carries the
+              // "Warning" header, so the text itself stays plain.
+              content: t('chat.attachments.storeFailedWarning', { count: failedCount, names: failedNames }),
               timestamp: Date.now()
             }]
           }))

@@ -10,6 +10,7 @@ import {
   clampFloatLeft,
   clampFloatBottom,
 } from '@/components/ui/viewport-portal'
+import { resolveComposerFloatAnchor } from '@/components/ui/composer-float-anchor'
 import { PERMISSION_MODE_CONFIG, PERMISSION_MODE_ORDER, type PermissionMode } from '@polo-ai/shared/agent/modes'
 
 // ============================================================================
@@ -680,24 +681,12 @@ export function useInlineSlashCommand({
       setFilter(filterText)
 
       if (inputRef.current) {
-        // Try to get actual caret position from the input element
-        const caretRect = inputRef.current.getCaretRect?.()
-
-        if (caretRect && caretRect.x > 0) {
-          // Use actual caret position
-          setPosition({
-            x: caretRect.x,
-            y: caretRect.y,
-          })
-        } else {
-          // Fallback: position at input element's left edge
-          const rect = inputRef.current.getBoundingClientRect()
-          const lineHeight = 20
-          const linesBeforeCursor = textBeforeCursor.split('\n').length - 1
-          setPosition({
-            x: rect.left,
-            y: rect.top + (linesBeforeCursor + 1) * lineHeight,
-          })
+        // Caret anchor: real caret measurement first, container-rect fallback
+        // with real computed line-height (shared contract, see
+        // composer-float-anchor.ts and viewport-portal.tsx).
+        const anchor = resolveComposerFloatAnchor(inputRef.current, textBeforeCursor)
+        if (anchor) {
+          setPosition(anchor)
         }
       }
 
