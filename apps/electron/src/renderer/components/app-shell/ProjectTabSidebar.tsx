@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useStore } from 'jotai'
-import { Plus, Settings2 } from 'lucide-react'
+import { Settings2 } from 'lucide-react'
 
-import { cn } from '@/lib/utils'
 import { rightPaneNativeSuspendAtom } from '@/atoms/right-pane-suspension'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
@@ -33,8 +32,12 @@ import { isSeparatorItem, type SidebarItem } from './LeftSidebar'
  *   (drawer form — the sidebar has no conversation lane to push into);
  * - settings: the gear opening the project settings dialog (the ONLY entry
  *   now that the home card lost its button, R8);
- * - 「新建会话」: the EXISTING enterprise routing (`routeEnterpriseNewSession`)
- *   — the project's zero-write empty state, never a session factory.
+ * - conversations: the filter list AppShell keeps (`nav:allSessions` +
+ *   `nav:labels`), already filtered to the active project.
+ *
+ * POO-207: no 「新建会话」 here — the navigator (session list) header has
+ * owned new-session since POO-202, and the duplicate button only taught two
+ * homes for the same action.
  *
  * The identity reads the projects-bus `ActiveProjectRef`, so a settings save
  * that refreshes the active tab's project payload re-publishes through the
@@ -78,14 +81,12 @@ export function projectTabViewerRole(project: ActiveProjectRef, rosterViewerRole
 export interface ProjectTabSidebarProps {
   /** The ACTIVE tab's project (the projects-bus ref — scope-stamped). */
   project: ActiveProjectRef
-  /** 「新建会话」— the existing enterprise routing, owned by the caller. */
-  onNewSession: () => void
   /** A settings save landed: the caller refreshes the active tab's project
    * payload (which re-publishes the bus and re-renders this header). */
   onProjectSaved?: (fresh: { name: string; purpose?: string; instructions?: string; myRole: ActiveProjectRef['myRole'] }) => void
 }
 
-export function ProjectTabSidebar({ project, onNewSession, onProjectSaved }: ProjectTabSidebarProps) {
+export function ProjectTabSidebar({ project, onProjectSaved }: ProjectTabSidebarProps) {
   const { t } = useTranslation()
   const store = useStore()
   const workbenchStyle = useClientWorkbenchStyle()
@@ -182,18 +183,6 @@ export function ProjectTabSidebar({ project, onNewSession, onProjectSaved }: Pro
           className="mt-[6px] inline-flex h-7 w-full items-center gap-1.5 rounded-[6px] px-1.5 text-left text-[12px] font-medium text-muted-foreground transition-colors hover:bg-sidebar-hover hover:text-foreground focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
         >
           <ProjectMembersEntryLabel roster={roster} />
-        </button>
-        <button
-          type="button"
-          data-testid="project-tab-new-session"
-          onClick={onNewSession}
-          className={cn(
-            'mt-[4px] inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-[6px] border border-border text-[13px] font-medium text-foreground',
-            'transition-colors hover:bg-foreground-5 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring',
-          )}
-        >
-          <Plus className="size-3.5" aria-hidden="true" />
-          {t('projectTab.newSession')}
         </button>
       </div>
 

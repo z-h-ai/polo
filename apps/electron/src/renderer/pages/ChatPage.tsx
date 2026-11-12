@@ -1045,10 +1045,12 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   // Members entry (project sessions only) rides BEFORE the share/info control
   // in the header actions slot — desktop and compact alike (P9: the entry is
   // the header's own; the drawer it opens stays reachable on narrow windows).
-  // POO-202: focus mode (沉浸模式) moved here from the TopBar brand slot —
-  // it leads the share/close cluster at the chat window's top-right. Same
+  // POO-202: focus mode (沉浸模式) moved here from the TopBar brand slot;
+  // POO-207: it now rides the header's LEFT (message-side) `startActions`
+  // slot — the right cluster kept piling buttons (focus/members/share). Same
   // registry action as ⌘. and the native menu; compact mode force-hides
-  // sidebar/navigator anyway, so the control would be dead there.
+  // sidebar/navigator anyway, so the control would be dead there (and
+  // startActions is a desktop-only slot).
   const actionRegistry = useOptionalActionRegistry()
   const isFocusMode = useAtomValue(workbenchFocusModeAtom) === true
   const focusModeButton = React.useMemo(() => {
@@ -1072,7 +1074,6 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     </div>
   ) : (
     <div className="flex items-center">
-      {focusModeButton}
       {membersEntryButton}
       {shareButton}
     </div>
@@ -1178,7 +1179,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
               forms. Push rides inside as a flex sibling; drawer portals out. */}
           <div ref={membersLaneRef} className="h-full flex min-h-0 min-w-0">
             <div className="h-full flex min-h-0 min-w-0 flex-1 flex-col">
-              <PanelHeader  title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
+              <PanelHeader  title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} startActions={focusModeButton} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
               {showProjectTabs && (
                 <ProjectContextTabs value={projectTab} onValueChange={setProjectTab} />
               )}
@@ -1286,7 +1287,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       {/* The chat lane (D8 measurement node) — see the skeleton branch. */}
       <div ref={membersLaneRef} className="h-full flex min-h-0 min-w-0">
         <div className="h-full flex min-h-0 min-w-0 flex-1 flex-col">
-          <PanelHeader  title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
+          <PanelHeader  title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} startActions={focusModeButton} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
           {showProjectTabs && (
             <ProjectContextTabs value={projectTab} onValueChange={setProjectTab} />
           )}

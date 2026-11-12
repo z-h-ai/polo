@@ -2305,7 +2305,6 @@
   "projectSettings.charCount": "{{count}}/{{max}}",
   "projectSettings.notSet": "Nie ustawiono",
   "projectSettings.saved": "Zapisano",
-  "projectTab.newSession": "Nowa sesja",
   "projectTab.openSettings": "Ustawienia projektu",
   "reauth.loginFailed": "Logowanie nie powiodło się",
   "sendToWorkspace.alreadyExists": "{{resource}} już istnieje w {{target}}",
