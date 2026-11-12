@@ -3562,8 +3562,24 @@ function AppShellContent({
        * The anchor Y position is captured from the right-clicked item (editPopoverAnchorY ref)
        * so the popover appears near the triggering item rather than at a fixed location.
        * modal={true} prevents auto-close when focus shifts after context menu closes.
+       *
+       * POO-206: an ENTERPRISE project tab must not mount this group. Each of
+       * these triggers is a `fixed w-0 h-0` virtual anchor — out of flow, so
+       * the personal-space PopoverTrigger branch costs nothing. But the
+       * enterprise blocked branch wraps the trigger in an IN-FLOW
+       * `inline-flex` span (EditPopover's POO-205 C6 gate), and ten of those
+       * spans rendered after the 100%-height shell root formed an anonymous
+       * line box (~23px strut) that leaked into #root's scrollHeight.
+       * overflow:hidden still scrolls programmatically, so the next
+       * focus/scrollIntoView yanked the whole shell up under the fixed
+       * TopBar with a grey band below — and no scrollbar to undo it. The
+       * entries feeding this group are unreachable or inert in an enterprise
+       * project tab anyway (sidebar whitelist trim + open forced false), so
+       * skipping the group is behavior-neutral there. If you ever add another
+       * virtual-anchor popover here, it must stay out of this gate's path or
+       * use an out-of-flow trigger wrapper itself.
        */}
-      {activeWorkspace && (
+      {activeWorkspace && !isEnterpriseProjectTab && (
         <>
           {/* Configure Statuses EditPopover - anchored near sidebar */}
           <EditPopover
