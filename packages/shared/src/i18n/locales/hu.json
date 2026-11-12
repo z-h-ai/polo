@@ -2297,7 +2297,6 @@
   "projectSettings.charCount": "{{count}}/{{max}}",
   "projectSettings.notSet": "Nincs megadva",
   "projectSettings.saved": "Mentve",
-  "projectTab.newSession": "Új beszélgetés",
   "projectTab.openSettings": "Projektbeállítások",
   "reauth.loginFailed": "A bejelentkezés sikertelen",
   "sendToWorkspace.alreadyExists": "A {{resource}} már létezik itt: {{target}}",

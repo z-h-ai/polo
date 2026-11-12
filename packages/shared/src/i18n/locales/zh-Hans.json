@@ -2297,7 +2297,6 @@
   "projectSettings.charCount": "{{count}}/{{max}}",
   "projectSettings.notSet": "未设置",
   "projectSettings.saved": "已保存",
-  "projectTab.newSession": "新建会话",
   "projectTab.openSettings": "项目设置",
   "reauth.loginFailed": "登录失败",
   "sendToWorkspace.alreadyExists": "{{resource}} 已存在于 {{target}}",
