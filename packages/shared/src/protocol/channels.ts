@@ -440,6 +440,12 @@ export const RPC_CHANNELS = {
     GET_PREVIEW_URL: 'pc:getPreviewUrl',
     SEARCH_ASSETS: 'pc:searchAssets',
     REBUILD: 'pc:rebuild',
+    // POO-210 batch upload staging (LOCAL_ONLY, transport-layer only — no
+    // PC wire contract change): the zip unpack/folder scan that builds the
+    // entry list, and the cleanup for the staging directory it writes.
+    STAGE_ZIP_BATCH: 'pc:stageZipBatch',
+    SCAN_FOLDER: 'pc:scanFolder',
+    STAGE_CLEANUP: 'pc:stageCleanup',
   },
   // Enterprise project members (POO-196 追加轮): the account-scoped create and
   // create-receipt commands plus the committed-space roster/invitation reads.
