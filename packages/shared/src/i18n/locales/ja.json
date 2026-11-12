@@ -1273,6 +1273,7 @@
   "menu.cut": "カット",
   "menu.debug": "デバッグ",
   "menu.edit": "編集",
+  "menu.exitFocusMode": "フォーカスモードを終了",
   "menu.file": "ファイル",
   "menu.forceReload": "強制再読み込み",
   "menu.help": "ヘルプ",

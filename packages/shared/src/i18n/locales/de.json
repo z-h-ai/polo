@@ -1273,6 +1273,7 @@
   "menu.cut": "Ausschneiden",
   "menu.debug": "Debug",
   "menu.edit": "Bearbeiten",
+  "menu.exitFocusMode": "Fokusmodus beenden",
   "menu.file": "Datei",
   "menu.forceReload": "Neu laden erzwingen",
   "menu.help": "Hilfe",

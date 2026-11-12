@@ -1055,19 +1055,25 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   // startActions is a desktop-only slot).
   const actionRegistry = useOptionalActionRegistry()
   const isFocusMode = useAtomValue(workbenchFocusModeAtom) === true
+  // POO-209: an active toggle must not keep advertising "切换" — while focus
+  // mode is on the button offers the way out (退出专注模式), with the same
+  // pressed treatment as the other header toggles (filter: bg tint + tinted
+  // shadow; sidebar: aria-pressed).
+  const focusModeLabel = isFocusMode ? t('menu.exitFocusMode') : t('menu.toggleFocusMode')
   const focusModeButton = React.useMemo(() => {
     if (isCompactMode) return undefined
     return (
       <PanelHeaderCenterButton
         icon={<Focus className="h-4 w-4" />}
-        tooltip={t('menu.toggleFocusMode')}
+        tooltip={focusModeLabel}
+        aria-label={focusModeLabel}
         aria-pressed={isFocusMode}
         data-testid="chat-focus-toggle"
         onClick={() => actionRegistry?.execute('view.toggleFocusMode')}
-        className={isFocusMode ? 'text-accent opacity-100' : undefined}
+        className={isFocusMode ? 'bg-accent/10 text-accent opacity-100 shadow-tinted' : undefined}
       />
     )
-  }, [isCompactMode, isFocusMode, actionRegistry, t])
+  }, [isCompactMode, isFocusMode, focusModeLabel, actionRegistry])
 
   // gap-1.5 matches the PanelHeader actions-row spacing: the ghost members
   // entry lost its border, so without an explicit gap the two buttons read
