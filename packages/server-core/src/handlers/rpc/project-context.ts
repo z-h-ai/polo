@@ -19,8 +19,12 @@ import {
   pcGetPreviewUrl,
   pcSearchAssets,
   pcRebuild,
+  pcStageZipBatch,
+  pcScanFolder,
+  pcStageCleanup,
   parsePcInput,
 } from '../../project-context/service'
+import { cleanStagingRoot } from '../../project-context/batch-staging'
 import { z } from 'zod'
 
 /**
@@ -54,6 +58,9 @@ export const PROJECT_CONTEXT_HANDLED_CHANNELS = [
   RPC_CHANNELS.projectContext.GET_PREVIEW_URL,
   RPC_CHANNELS.projectContext.SEARCH_ASSETS,
   RPC_CHANNELS.projectContext.REBUILD,
+  RPC_CHANNELS.projectContext.STAGE_ZIP_BATCH,
+  RPC_CHANNELS.projectContext.SCAN_FOLDER,
+  RPC_CHANNELS.projectContext.STAGE_CLEANUP,
 ] as const
 
 const WorkspaceScopeSchema = z.object({
@@ -113,6 +120,20 @@ const DownloadSchema = AssetIdSchema.extend({
 
 const TrashSchema = AssetIdSchema.extend({
   expectedRevision: z.number().int().min(1),
+}).strict()
+
+const StageZipSchema = WorkspaceScopeSchema.extend({
+  zipPath: z.string().min(1).max(4_096),
+  maxEntryBytes: z.number().int().min(1),
+}).strict()
+
+const ScanFolderSchema = WorkspaceScopeSchema.extend({
+  folderPath: z.string().min(1).max(4_096),
+  maxEntryBytes: z.number().int().min(1),
+}).strict()
+
+const StageCleanupSchema = z.object({
+  batchId: z.string().regex(/^[0-9a-f]{32}$/),
 }).strict()
 
 function parseOrThrow<T>(schema: { safeParse(input: unknown): { success: boolean; data?: T } }, raw: unknown): T {
@@ -197,4 +218,24 @@ export function registerProjectContextHandlers(
     const input = parseOrThrow(WorkspaceScopeSchema, rawInput)
     return pcRebuild(deps, ctx, input)
   })
+
+  server.handle(RPC_CHANNELS.projectContext.STAGE_ZIP_BATCH, async (ctx: RequestContext, rawInput: unknown) => {
+    const input = parseOrThrow(StageZipSchema, rawInput)
+    return pcStageZipBatch(deps, ctx, input)
+  })
+
+  server.handle(RPC_CHANNELS.projectContext.SCAN_FOLDER, async (ctx: RequestContext, rawInput: unknown) => {
+    const input = parseOrThrow(ScanFolderSchema, rawInput)
+    return pcScanFolder(deps, ctx, input)
+  })
+
+  server.handle(RPC_CHANNELS.projectContext.STAGE_CLEANUP, async (ctx: RequestContext, rawInput: unknown) => {
+    const input = parseOrThrow(StageCleanupSchema, rawInput)
+    return pcStageCleanup(deps, ctx, input)
+  })
+
+  // POO-210: a crashed previous process leaves staging debris under the
+  // shared tmp root; this process owns no batches until its first stage
+  // call, so registration time is the one safe moment to sweep it.
+  void cleanStagingRoot()
 }

@@ -32,13 +32,21 @@ import {
   prepareAssetUploadFile,
   type PreparedAssetUpload,
 } from './asset-upload-prep'
-import { projectContextErrorKey } from './useProjectAssets'
+import { projectContextErrorKey, type PcScope } from './useProjectAssets'
+import { useBatchUpload, type BatchUploadController, type BatchUploadTotals } from './batch-upload/useBatchUpload'
+import { BatchUploadView } from './batch-upload/BatchUploadView'
 
 /**
  * The project file upload dialog, create mode (POO-196). One local file per
  * submission: pick → measure + integrity digest → name/tags/source → the
  * single pcUploadFile RPC (the renderer never sees a transfer URL). The same
  * form drives AssetReplaceDialog in replace mode.
+ *
+ * POO-210 adds the BATCH mode (decision D4): the same dialog routes a
+ * multi-pick, a folder pick or a zip pick into the checklist view
+ * (batch-upload/), while a single non-zip pick keeps the original form —
+ * one surface, no second dialog to learn. The per-entry write is the same
+ * `pcUploadFile` RPC; the admin wire never sees a batch.
  */
 
 export interface AssetUploadInput {
@@ -61,6 +69,20 @@ export interface AssetUploadDialogProps {
    * resolved promise closes the dialog (the parent refreshes its list).
    */
   onSubmit: (input: AssetUploadInput) => Promise<void>
+  /**
+   * POO-210 batch mode: the project scope the staging/scan RPCs run under.
+   * The batch entries disappear when it is absent (a caller that cannot
+   * upload batch entries has no use for the checklist either).
+   */
+  scope?: PcScope
+  /**
+   * The batch's per-entry write — deliberately SEPARATE from `onSubmit`:
+   * the single-file write closes the dialog on success, a batch entry must
+   * not (the checklist keeps running).
+   */
+  onBatchEntry?: (input: AssetUploadInput) => Promise<void>
+  /** Fired once when the whole checked batch settled (parent refreshes). */
+  onBatchSettled?: (totals: BatchUploadTotals) => void
 }
 
 /** Upload-write failures map through the shared pc_* table; prep failures get their own copy. */
@@ -102,6 +124,8 @@ export function AssetUploadForm({
   testIdPrefix = 'pc-upload',
   onCancel,
   onProgress,
+  hidePickZone = false,
+  presetPath,
 }: {
   maxUploadBytes: number
   initialName?: string
@@ -116,6 +140,16 @@ export function AssetUploadForm({
   onCancel?: () => void
   /** Reports the state the owning dialog needs to guard closing. */
   onProgress?: (state: { submitting: boolean; hasDraft: boolean }) => void
+  /**
+   * POO-210: when set, the dialog owns the pick zone (its smart entry
+   * routes multi-pick / folder / zip), so the form hides its own.
+   */
+  hidePickZone?: boolean
+  /**
+   * POO-210: a path the dialog's smart entry decided belongs to THIS form
+   * (a single plain-file pick). Ingested like a native pick on change.
+   */
+  presetPath?: string | null
 }) {
   const { t } = useTranslation()
   const [picked, setPicked] = React.useState<PreparedAssetUpload | null>(null)
@@ -158,6 +192,12 @@ export function AssetUploadForm({
       if (prepAbortRef.current === controller) prepAbortRef.current = null
     }
   }, [maxUploadBytes, initialName])
+
+  // POO-210: the dialog's smart entry can hand THIS form a single pick —
+  // ingest it exactly like a native pick whenever it changes.
+  React.useEffect(() => {
+    if (presetPath) void ingestPath(presetPath)
+  }, [presetPath, ingestPath])
 
   const handlePickButton = React.useCallback(async () => {
     setErrorKey(null)
@@ -263,6 +303,7 @@ export function AssetUploadForm({
         className={cn(
           'flex flex-col items-center justify-center gap-1 rounded-[12px] border border-dashed border-border px-4 py-6 text-center transition-colors hover:bg-foreground/[0.03]',
           'disabled:cursor-not-allowed disabled:opacity-60',
+          hidePickZone && 'hidden',
         )}
         data-testid={`${testIdPrefix}-pick`}
       >
@@ -467,10 +508,133 @@ export function useUploadDialogCloseGuard(onClose: () => void) {
   return { attemptClose, handleProgress, confirmElement, formState }
 }
 
-export function AssetUploadDialog({ open, maxUploadBytes, onClose, onSubmit }: AssetUploadDialogProps) {
+/** A picked path routes to the batch unpack flow when it names an archive. */
+function looksLikeZipPath(path: string): boolean {
+  return path.toLowerCase().endsWith('.zip')
+}
+
+export function AssetUploadDialog({
+  open,
+  maxUploadBytes,
+  onClose,
+  onSubmit,
+  scope,
+  onBatchEntry,
+  onBatchSettled,
+}: AssetUploadDialogProps) {
   const { t } = useTranslation()
   const workbenchStyle = useClientWorkbenchStyle()
-  const { attemptClose, handleProgress, confirmElement, formState } = useUploadDialogCloseGuard(onClose)
+  const [batchMode, setBatchMode] = React.useState(false)
+  const [batchErrorKey, setBatchErrorKey] = React.useState<string | null>(null)
+  /** A single plain-file pick from the smart zone, handed to the form. */
+  const [singlePickPath, setSinglePickPath] = React.useState<string | null>(null)
+  const batchAvailable = !!scope && !!onBatchEntry
+
+  // The controller mounts with the dialog (hooks are unconditional) and
+  // idles until a batch source lands. `stopForClose` is a no-op while
+  // nothing is staged or queued, so the single-file close path pays nothing.
+  const batch = useBatchUpload({
+    scope: scope ?? null,
+    maxUploadBytes,
+    onSubmit: onBatchEntry ?? (async () => {}),
+    onSettled: onBatchSettled,
+  })
+  const batchActive = batchAvailable && batchMode
+
+  // The dialog component stays mounted across open/close; the checklist
+  // state must not survive a close (staging was already dropped on the way
+  // out), or the next open would resurrect a stale list.
+  React.useEffect(() => {
+    if (open) return
+    setBatchMode(false)
+    setBatchErrorKey(null)
+    setSinglePickPath(null)
+  }, [open])
+
+  // Every dialog close funnels through here so a zip batch's staging
+  // directory dies with the dialog on ALL paths (done button, guarded
+  // discard, unmount backstop inside the hook).
+  const closeWithCleanup = React.useCallback(async () => {
+    await batch.stopForClose()
+    onClose()
+  }, [batch, onClose])
+
+  const { attemptClose, handleProgress, confirmElement, formState } = useUploadDialogCloseGuard(closeWithCleanup)
+
+  // The batch checklist reports its own guarded-close state: an upload in
+  // flight refuses to close; a staged/checked batch is a draft to discard.
+  React.useEffect(() => {
+    if (!batchActive) return
+    handleProgress({ submitting: batch.uploading, hasDraft: true })
+  }, [batchActive, batch.uploading, handleProgress])
+
+  const exitBatch = React.useCallback(() => {
+    setBatchErrorKey(null)
+    setBatchMode(false)
+  }, [])
+
+  /* ---- The three batch entries (D4) ---- */
+
+  const pickSmart = React.useCallback(async () => {
+    setBatchErrorKey(null)
+    const paths = await window.electronAPI.openFileDialog()
+    if (!paths || paths.length === 0) return
+    // One plain file keeps the original form; one zip unpacks; several
+    // files (zips included — they upload as plain files there) batch up.
+    if (paths.length === 1 && looksLikeZipPath(paths[0])) {
+      try {
+        setBatchMode(true)
+        await batch.beginZipBatch(paths[0])
+      } catch (error) {
+        setBatchMode(false)
+        setBatchErrorKey(projectContextUploadErrorKey(error))
+      }
+      return
+    }
+    if (paths.length === 1) {
+      setSinglePickPath(paths[0])
+      return
+    }
+    batch.beginFilesBatch(paths)
+    setBatchMode(true)
+  }, [batch])
+
+  const pickFolder = React.useCallback(async () => {
+    if (!batchAvailable) return
+    setBatchErrorKey(null)
+    const folderPath = await window.electronAPI.openFolderDialog()
+    if (!folderPath) return
+    try {
+      setBatchMode(true)
+      await batch.beginFolderBatch(folderPath)
+    } catch (error) {
+      setBatchMode(false)
+      setBatchErrorKey(projectContextUploadErrorKey(error))
+    }
+  }, [batchAvailable, batch])
+
+  const pickZip = React.useCallback(async () => {
+    if (!batchAvailable) return
+    setBatchErrorKey(null)
+    const paths = await window.electronAPI.openFileDialog()
+    const zipPath = paths?.find((path) => looksLikeZipPath(path))
+    if (!zipPath) {
+      // No archive in the pick: say so instead of silently doing nothing.
+      setBatchErrorKey(paths?.length ? 'projectContext.upload.batch.notZip' : null)
+      return
+    }
+    try {
+      setBatchMode(true)
+      await batch.beginZipBatch(zipPath)
+    } catch (error) {
+      setBatchMode(false)
+      setBatchErrorKey(projectContextUploadErrorKey(error))
+    }
+  }, [batchAvailable, batch])
+
+  const handleBatchDone = React.useCallback(() => {
+    void closeWithCleanup()
+  }, [closeWithCleanup])
 
   return (
     <>
@@ -487,20 +651,75 @@ export function AssetUploadDialog({ open, maxUploadBytes, onClose, onSubmit }: A
           data-testid="pc-upload-dialog"
         >
           <DialogHeader>
-            <DialogTitle>{t('projectContext.upload.title')}</DialogTitle>
-            <DialogDescription>{t('projectContext.upload.description')}</DialogDescription>
+            <DialogTitle>{t(batchActive ? 'projectContext.upload.batch.title' : 'projectContext.upload.title')}</DialogTitle>
+            <DialogDescription>
+              {t(batchActive ? 'projectContext.upload.batch.description' : 'projectContext.upload.description')}
+            </DialogDescription>
           </DialogHeader>
           <div className="max-h-[70vh] overflow-y-auto px-[20px] pb-[18px]">
-            <AssetUploadForm
-              maxUploadBytes={maxUploadBytes}
-              submitLabel={t('projectContext.upload.submit')}
-              busyLabel={t('projectContext.upload.submitting')}
-              pickLabel={t('projectContext.upload.pick')}
-              repickLabel={t('projectContext.upload.repick')}
-              onSubmit={onSubmit}
-              onCancel={attemptClose}
-              onProgress={handleProgress}
-            />
+            {batchErrorKey && (
+              <p className="mb-3 text-[12px] text-destructive" role="alert" data-testid="pc-upload-batch-error">
+                {t(batchErrorKey)}
+              </p>
+            )}
+            {batchActive ? (
+              <BatchUploadView
+                controller={batch}
+                onBack={() => { void batch.stopForClose(); exitBatch() }}
+                onClose={handleBatchDone}
+              />
+            ) : (
+              <div className="flex flex-col gap-3">
+                <AssetUploadForm
+                  maxUploadBytes={maxUploadBytes}
+                  submitLabel={t('projectContext.upload.submit')}
+                  busyLabel={t('projectContext.upload.submitting')}
+                  pickLabel={t('projectContext.upload.pick')}
+                  repickLabel={t('projectContext.upload.repick')}
+                  onSubmit={onSubmit}
+                  onCancel={attemptClose}
+                  onProgress={handleProgress}
+                  hidePickZone={batchAvailable}
+                  presetPath={singlePickPath}
+                />
+                {batchAvailable && (
+                  <div className="flex flex-col gap-2" data-testid="pc-upload-batch-entries">
+                    {/* The dialog's smart pick zone (POO-210 D4): one button
+                        per source shape — files (multi), folder, zip unpack. */}
+                    <button
+                      type="button"
+                      className="flex flex-col items-center justify-center gap-1 rounded-[12px] border border-dashed border-border px-4 py-6 text-center transition-colors hover:bg-foreground/[0.03]"
+                      onClick={() => void pickSmart()}
+                      data-testid="pc-upload-pick-smart"
+                    >
+                      <Icons.FileUp className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
+                      <span className="text-[13px] text-foreground">{t('projectContext.upload.batch.pickFiles')}</span>
+                      <span className="text-[11px] text-muted-foreground">{t('projectContext.upload.batch.pickFilesHint')}</span>
+                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-[10px] border border-border px-3 py-1.5 text-[12px] text-foreground-70 transition-colors hover:bg-foreground/5"
+                        onClick={() => void pickFolder()}
+                        data-testid="pc-upload-pick-folder"
+                      >
+                        <Icons.FolderOpen className="h-3.5 w-3.5" aria-hidden="true" />
+                        {t('projectContext.upload.batch.pickFolder')}
+                      </button>
+                      <button
+                        type="button"
+                        className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-[10px] border border-border px-3 py-1.5 text-[12px] text-foreground-70 transition-colors hover:bg-foreground/5"
+                        onClick={() => void pickZip()}
+                        data-testid="pc-upload-pick-zip"
+                      >
+                        <Icons.FileArchive className="h-3.5 w-3.5" aria-hidden="true" />
+                        {t('projectContext.upload.batch.pickZip')}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </DialogContent>
       </Dialog>

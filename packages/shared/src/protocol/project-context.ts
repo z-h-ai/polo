@@ -48,7 +48,20 @@ export * from '../admin/project-context-contract'
  * copy. Registered in the transport whitelist through `./types.ts` so the
  * coded-error bridge can carry them to the renderer.
  */
-export const PC_LOCAL_ERROR_CODES = ['pc_unavailable_in_personal', 'pc_download_failed'] as const
+export const PC_LOCAL_ERROR_CODES = [
+  'pc_unavailable_in_personal',
+  'pc_download_failed',
+  // POO-210 batch upload staging: raised by the LOCAL stage/scan channels at
+  // the trusted side's own boundary (the admin wire never sees them). The
+  // renderer maps each to its own recovery copy — a 200MB+ archive, a bomb
+  // guard trip, a corrupt zip, an unreadable source and a staging write
+  // failure are five different user-facing sentences.
+  'pc_stage_zip_too_large',
+  'pc_stage_zip_bomb',
+  'pc_stage_zip_invalid',
+  'pc_stage_read_failed',
+  'pc_stage_write_failed',
+] as const
 export type PcLocalErrorCode = (typeof PC_LOCAL_ERROR_CODES)[number]
 
 /**
@@ -229,6 +242,85 @@ export type PcSearchAssetsInput = z.output<typeof PcSearchAssetsInputSchema>
 
 export const PcRebuildInputSchema = PcIpcAssetScopeSchema.extend({}).strict()
 export type PcRebuildInput = z.output<typeof PcRebuildInputSchema>
+
+/* ------------------------------------------------------------------ */
+/* POO-210 batch upload staging (LOCAL_ONLY, transport-layer only)     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * D5's submit budget: the batch checklist's DEFAULT selection never exceeds
+ * this many entries. The overflow stays listed and unchecked — the caller
+ * explains (`defaultedDown`), never silently drops.
+ */
+export const PC_BATCH_SUBMIT_MAX = 500
+
+/**
+ * The batch upload entry list (zip unpack / folder scan). Deliberately NOT
+ * part of the admin project-context contract: staging happens entirely on
+ * the trusted local side — the admin never sees a batch, only the resulting
+ * `pcUploadFile` calls, one per entry, in the unchanged single-file shape.
+ * `reason` is the stable exclusion vocabulary the renderer maps to copy;
+ * `stagedPath` is a real local file the upload RPC streams ("" for entries
+ * that cannot be uploaded at all) — a zip entry name never becomes a
+ * filesystem path here. A zip batch's LAST entry is the archive itself
+ * (D3c): `included: false`, uploading the original file if the user checks it.
+ */
+export const PC_BATCH_EXCLUSION_REASONS = [
+  'hidden',
+  'dependency_dir',
+  'binary_format',
+  'empty',
+  'too_large',
+  'symlink',
+] as const
+export type PcBatchExclusionReason = (typeof PC_BATCH_EXCLUSION_REASONS)[number]
+
+export const PcBatchSourceEntrySchema = z.object({
+  entryId: z.string().min(1),
+  sourcePath: z.string(),
+  displayName: z.string().min(1),
+  sizeBytes: z.number().int().min(0),
+  included: z.boolean(),
+  reason: z.enum(PC_BATCH_EXCLUSION_REASONS).nullable(),
+  stagedPath: z.string(),
+}).strict()
+export type PcBatchSourceEntry = z.output<typeof PcBatchSourceEntrySchema>
+
+export const PcStageZipBatchInputSchema = PcIpcAssetScopeSchema.extend({
+  zipPath: z.string().min(1),
+  maxEntryBytes: z.number().int().min(1),
+}).strict()
+export type PcStageZipBatchInput = z.output<typeof PcStageZipBatchInputSchema>
+
+export const PcStagedZipBatchResponseSchema = z.object({
+  batchId: z.string().regex(/^[0-9a-f]{32}$/),
+  entries: z.array(PcBatchSourceEntrySchema),
+  /** True when the entry count hit the scan ceiling — the caller must say so. */
+  truncated: z.boolean(),
+}).strict()
+export type PcStagedZipBatchResponse = z.output<typeof PcStagedZipBatchResponseSchema>
+
+export const PcScanFolderInputSchema = PcIpcAssetScopeSchema.extend({
+  folderPath: z.string().min(1),
+  maxEntryBytes: z.number().int().min(1),
+}).strict()
+export type PcScanFolderInput = z.output<typeof PcScanFolderInputSchema>
+
+export const PcScanFolderResponseSchema = z.object({
+  entries: z.array(PcBatchSourceEntrySchema),
+  truncated: z.boolean(),
+}).strict()
+export type PcScanFolderResponse = z.output<typeof PcScanFolderResponseSchema>
+
+export const PcStageCleanupInputSchema = z.object({
+  batchId: z.string().regex(/^[0-9a-f]{32}$/),
+}).strict()
+export type PcStageCleanupInput = z.output<typeof PcStageCleanupInputSchema>
+
+export const PcStageCleanupResponseSchema = z.object({
+  cleaned: z.boolean(),
+}).strict()
+export type PcStageCleanupResponse = z.output<typeof PcStageCleanupResponseSchema>
 
 /* ------------------------------------------------------------------ */
 /* Message-borne payloads (project asset references)                  */

@@ -386,6 +386,13 @@ export const CHANNEL_MAP = {
   pcSearchAssets: invokeCoded(RPC_CHANNELS.projectContext.SEARCH_ASSETS),
   pcRebuild: invokeCoded(RPC_CHANNELS.projectContext.REBUILD),
 
+  // POO-210 batch upload staging. Transport-layer only — the batch never
+  // touches the admin contract; these build the LOCAL entry list the dialog
+  // shows (zip unpack / folder scan) and clean the staging directory after.
+  pcStageZipBatch: invokeCoded(RPC_CHANNELS.projectContext.STAGE_ZIP_BATCH),
+  pcScanFolder: invokeCoded(RPC_CHANNELS.projectContext.SCAN_FOLDER),
+  pcStageCleanup: invokeCoded(RPC_CHANNELS.projectContext.STAGE_CLEANUP),
+
   // Projects & project members (POO-205). codedErrors for the same reason as
   // the pc block: the renderer's recovery copy branches on the stable
   // contract codes (prj_forbidden, prj_not_found,

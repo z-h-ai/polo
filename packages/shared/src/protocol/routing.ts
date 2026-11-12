@@ -93,6 +93,12 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.projectContext.SEARCH_ASSETS,
   RPC_CHANNELS.projectContext.REBUILD,
 
+  // POO-210 batch upload staging — reads/writes only local disk (staging tmp
+  // + the picked folder), so it can never serve a remote session.
+  RPC_CHANNELS.projectContext.STAGE_ZIP_BATCH,
+  RPC_CHANNELS.projectContext.SCAN_FOLDER,
+  RPC_CHANNELS.projectContext.STAGE_CLEANUP,
+
   // pm — Project members & projects (POO-205). POO-196's enterprise creation
   // and targeted invitation channels are RETIRED (organizations come from the
   // admin console; project members are picked from the organization roster).
