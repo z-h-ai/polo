@@ -1069,13 +1069,16 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     )
   }, [isCompactMode, isFocusMode, actionRegistry, t])
 
+  // gap-1.5 matches the PanelHeader actions-row spacing: the ghost members
+  // entry lost its border, so without an explicit gap the two buttons read
+  // as one glued blob.
   const headerActions = isCompactMode ? (
-    <div className="flex items-center">
+    <div className="flex items-center gap-1.5">
       {membersEntryButton}
       {compactInfoButton}
     </div>
   ) : (
-    <div className="flex items-center">
+    <div className="flex items-center gap-1.5">
       {membersEntryButton}
       {shareButton}
     </div>
