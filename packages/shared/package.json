@@ -1,6 +1,6 @@
 {
   "name": "@polo-ai/shared",
-  "version": "0.30.2",
+  "version": "0.31.0",
   "license": "Apache-2.0",
   "description": "Shared business logic for Polo AI - agent, auth, config, credentials, MCP integration",
   "type": "module",
