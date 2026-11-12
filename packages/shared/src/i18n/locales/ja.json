@@ -314,6 +314,7 @@
   "chat.contextUsage.compact": "コンテキストの {{usagePercent}}% を使用中 — クリックでコンパクト化",
   "chat.contextUsage.wait": "コンテキストの {{usagePercent}}% を使用中 — 現在の操作を待っています",
   "chat.conversationCompacted": "会話をコンパクト化しました",
+  "chat.emptySession.tryHint": "以下の例を試すか、やりたいことをそのまま入力してください",
   "chat.enterSessionName": "セッション名を入力...",
   "chat.failedToCreateBranch": "ブランチの作成に失敗しました",
   "chat.failedToStopSharing": "共有の停止に失敗しました",

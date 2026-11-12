@@ -314,6 +314,7 @@
   "chat.contextUsage.compact": "Kontext zu {{usagePercent}}% genutzt — zum Komprimieren klicken",
   "chat.contextUsage.wait": "Kontext zu {{usagePercent}}% genutzt — auf die aktuelle Operation warten",
   "chat.conversationCompacted": "Unterhaltung komprimiert",
+  "chat.emptySession.tryHint": "Probiere einen davon oder schreibe einfach, was du erledigen möchtest",
   "chat.enterSessionName": "Sitzungsname eingeben...",
   "chat.failedToCreateBranch": "Zweig konnte nicht erstellt werden",
   "chat.failedToStopSharing": "Freigabe konnte nicht beendet werden",

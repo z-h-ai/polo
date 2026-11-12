@@ -314,6 +314,7 @@
   "chat.contextUsage.compact": "Kontextus {{usagePercent}}% használatban — kattints a tömörítéshez",
   "chat.contextUsage.wait": "Kontextus {{usagePercent}}% használatban — várd meg a folyamatban lévő műveletet",
   "chat.conversationCompacted": "Beszélgetés tömörítve",
+  "chat.emptySession.tryHint": "Próbáld ki az egyiket, vagy egyszerűen írd le, mit szeretnél",
   "chat.enterSessionName": "Add meg a munkamenet nevét...",
   "chat.failedToCreateBranch": "Az ág létrehozása sikertelen",
   "chat.failedToStopSharing": "A megosztás leállítása sikertelen",

@@ -314,6 +314,7 @@
   "chat.contextUsage.compact": "Contexto usado: {{usagePercent}}% — haz clic para compactar",
   "chat.contextUsage.wait": "Contexto usado: {{usagePercent}}% — espera a la operación actual",
   "chat.conversationCompacted": "Conversación compactada",
+  "chat.emptySession.tryHint": "Prueba uno de estos ejemplos o escribe directamente lo que necesites",
   "chat.enterSessionName": "Introduce el nombre de la sesión...",
   "chat.failedToCreateBranch": "No se pudo crear la rama",
   "chat.failedToStopSharing": "Error al detener la compartición",

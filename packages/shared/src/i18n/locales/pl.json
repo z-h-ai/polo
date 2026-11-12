@@ -318,6 +318,7 @@
   "chat.contextUsage.compact": "Wykorzystano {{usagePercent}}% kontekstu — kliknij, aby skompaktować",
   "chat.contextUsage.wait": "Wykorzystano {{usagePercent}}% kontekstu — poczekaj na zakończenie bieżącej operacji",
   "chat.conversationCompacted": "Rozmowa skompaktowana",
+  "chat.emptySession.tryHint": "Wypróbuj jeden z przykładów albo po prostu napisz, czego potrzebujesz",
   "chat.enterSessionName": "Wprowadź nazwę sesji...",
   "chat.failedToCreateBranch": "Nie udało się utworzyć gałęzi",
   "chat.failedToStopSharing": "Nie udało się zatrzymać udostępniania",

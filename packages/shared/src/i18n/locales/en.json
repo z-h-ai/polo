@@ -314,6 +314,7 @@
   "chat.contextUsage.compact": "{{usagePercent}}% context used — click to compact",
   "chat.contextUsage.wait": "{{usagePercent}}% context used — wait for current operation",
   "chat.conversationCompacted": "Conversation Compacted",
+  "chat.emptySession.tryHint": "Try one of these, or just type what you'd like to do",
   "chat.enterSessionName": "Enter session name...",
   "chat.failedToCreateBranch": "Failed to create branch",
   "chat.failedToStopSharing": "Failed to stop sharing",

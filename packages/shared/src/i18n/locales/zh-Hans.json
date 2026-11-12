@@ -314,6 +314,7 @@
   "chat.contextUsage.compact": "已用 {{usagePercent}}% 上下文，点击以压缩",
   "chat.contextUsage.wait": "已用 {{usagePercent}}% 上下文，请等待当前操作完成",
   "chat.conversationCompacted": "对话已压缩",
+  "chat.emptySession.tryHint": "试试下面的例子，或直接输入你想做的事",
   "chat.enterSessionName": "输入会话名称...",
   "chat.failedToCreateBranch": "创建分支失败",
   "chat.failedToStopSharing": "无法停止共享",
