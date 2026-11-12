@@ -117,6 +117,7 @@ import { toast } from "sonner"
 import { navigate, routes } from "@/lib/navigate"
 import { requestNewMainWindow } from "@/lib/new-window-request"
 import { useAssistantViewActions } from '@/hooks/useAssistantViewActions'
+import { useProjectTabSidebarCollapse } from '@/hooks/useProjectTabSidebarCollapse'
 import {
   useNavigation,
   useNavigationState,
@@ -577,6 +578,24 @@ function AppShellContent({
     return isFocusedMode || storage.get(storage.KEYS.focusModeEnabled, false)
   })
 
+  // POO-207: an enterprise PROJECT tab opens with the sidebar COLLAPSED. The
+  // project tab's sidebar only re-skins the conversation filter (C8 R7) —
+  // everything it shows is already in the adjacent navigator strip — so the
+  // tab starts with it closed and gives the width back to the conversation.
+  // The collapse is a tab-scoped OVERRIDE, not a new persisted preference:
+  // `storage.KEYS.sidebarVisible` keeps the user's workspace-wide choice, the
+  // toggle writes the override while a project tab hosts the shell, and
+  // leaving the project tab (any non-project tab, home included) hands the
+  // pre-entry visibility back (the hook + its contract test own the rules).
+  // Computed early because the auto-compact width math below needs the
+  // effective value.
+  const { activeTab: shellActiveTab } = useTabShell()
+  const committedSpaceKind = useAtomValue(committedSpaceKindAtom)
+  const isEnterpriseProjectTab = isEnterpriseProjectTabLayout(committedSpaceKind, shellActiveTab)
+  const activeProjectTabId = shellActiveTab.project?.projectId ?? null
+  const [projectTabSidebarOverride, setProjectTabSidebarOverride] = useProjectTabSidebarCollapse(isEnterpriseProjectTab, activeProjectTabId)
+  const effectiveSidebarVisible = projectTabSidebarOverride ?? isSidebarVisible
+
   // Auto-compact mode: shell width below mobile threshold hides sidebar/navigator
   // and switches to single-panel mode. Works in both webui (narrow viewport) and
   // desktop (narrow window or small screen).
@@ -613,7 +632,7 @@ function AppShellContent({
   })
   const rightPaneRatio = useAtomValue(canvasPaneWidthAtomFamily(canvasSessionId || SIDEBAR_ONLY_WIDTH_KEY))
   const effectiveSidebarAndNavigatorHidden = isSidebarAndNavigatorHidden || shouldAutoHideNavigation(
-    shellWidth, (isSidebarVisible ? sidebarWidth : 0) + sessionListWidth, hasRightPane ? rightPaneRatio : 0,
+    shellWidth, (effectiveSidebarVisible ? sidebarWidth : 0) + sessionListWidth, hasRightPane ? rightPaneRatio : 0,
   )
   const getCanvasLayoutRect = useCallback(() => shellRef.current?.getBoundingClientRect() ?? null, [])
   const { resolvedMode, isDark, setMode } = useTheme()
@@ -633,7 +652,7 @@ function AppShellContent({
   // settings route can only still land here through a restored route/history
   // entry from an earlier build; it then behaves like any other navigator
   // view, sidebar included, so the user can always leave.
-  const isAssistantSidebarVisible = isSidebarVisible && !effectiveSidebarAndNavigatorHidden
+  const isAssistantSidebarVisible = effectiveSidebarVisible && !effectiveSidebarAndNavigatorHidden
 
   const store = useStore()
   const panelStack = useAtomValue(panelStackAtom)
@@ -1134,7 +1153,6 @@ function AppShellContent({
   // and plain Tab must fall through to native traversal so the launcher
   // controls (management entry, All Apps, every App action) stay reachable
   // and the dedicated launcher scroll owner advances with focus (R42).
-  const { activeTab: shellActiveTab } = useTabShell()
   const isWorkbenchSurfaceActive = shellActiveTab.type === 'polo'
   useAction('nav.nextZone', () => {
     focusNextZone()
@@ -1169,8 +1187,15 @@ function AppShellContent({
       setIsSidebarAndNavigatorHidden(false)
       return
     }
+    // POO-207: on an enterprise project tab the toggle rides the tab-scoped
+    // override (POO-207 collapse default above) — the persisted workspace
+    // preference stays put and the pre-entry visibility returns with the tab.
+    if (projectTabSidebarOverride !== null) {
+      setProjectTabSidebarOverride(v => !v)
+      return
+    }
     setIsSidebarVisible(v => !v)
-  }, [isSidebarAndNavigatorHidden])
+  }, [isSidebarAndNavigatorHidden, projectTabSidebarOverride])
 
   const handleToggleFocusMode = useCallback(() => setIsSidebarAndNavigatorHidden(v => !v), [])
   useAssistantViewActions(handleToggleSidebar, handleToggleFocusMode)
@@ -1423,18 +1448,13 @@ function AppShellContent({
   // personal-chat / webapp tabs (driven by ProjectTabActiveProjectBridge).
   const activeProject = useSyncExternalStore(subscribeActiveProject, getActiveProjectRaw)
   // POO-205 C8 (R7): an ENTERPRISE project tab re-skins the sidebar as the
-  // PROJECT — the identity header (name/purpose/members/settings/new-session)
-  // replaces the workspace-global rows (sources/skills/automations/settings),
-  // which are workspace data and can never create a session from here. The
+  // PROJECT — the identity header (name/purpose/members/settings) replaces
+  // the workspace-global rows (sources/skills/automations/settings), which
+  // are workspace data and can never create a session from here. The
   // personal space (and every other tab) keeps the unified sidebar untouched.
-  const committedSpaceKind = useAtomValue(committedSpaceKindAtom)
-  const isEnterpriseProjectTab = isEnterpriseProjectTabLayout(committedSpaceKind, shellActiveTab)
-  const handleProjectTabNewSession = useCallback(() => {
-    // The EXISTING enterprise routing: the action route lands the project's
-    // zero-write empty state (NavigationContext owns the sequence — arming,
-    // tab activation, landing). No session is created on this path.
-    void navigate(routes.action.newSession())
-  }, [])
+  // POO-207: the tab also opens with the sidebar collapsed (the override near
+  // the sidebar-visibility state) and its header lost the 「新建会话」 button —
+  // the navigator header owns new-session since POO-202.
   const handleProjectSaved = useCallback((fresh: { name: string; purpose?: string; instructions?: string; myRole: 'owner' | 'manager' | 'member' }) => {
     // C9 (R12): a successful save BROADCASTS the fresh snapshot — the
     // directory-event bridge refreshes EVERY open tab carrying the project
@@ -1759,12 +1779,15 @@ function AppShellContent({
 
   // Persist sidebar visibility to localStorage; POO-191 mirrors the same fact
   // to the TopBar view controls (atoms read-only — the shell stays the truth).
+  // POO-207: storage keeps the workspace-wide preference (the project-tab
+  // collapse never writes it) while the mirror carries the EFFECTIVE value so
+  // the bar's view controls read what the shell is actually showing.
   const setWorkbenchSidebarVisible = useSetAtom(workbenchSidebarVisibleAtom)
   const setWorkbenchFocusMode = useSetAtom(workbenchFocusModeAtom)
   React.useEffect(() => {
     storage.set(storage.KEYS.sidebarVisible, isSidebarVisible)
-    setWorkbenchSidebarVisible(isSidebarVisible)
-  }, [isSidebarVisible, setWorkbenchSidebarVisible])
+    setWorkbenchSidebarVisible(effectiveSidebarVisible)
+  }, [isSidebarVisible, effectiveSidebarVisible, setWorkbenchSidebarVisible])
 
   // Persist focus mode state to localStorage; POO-191 mirror as above.
   React.useEffect(() => {
@@ -2373,14 +2396,14 @@ function AppShellContent({
                 <div className="flex-1 min-h-0">
                 {/* POO-205 C8 (R7): an ENTERPRISE project tab opens with the
                     project identity header — name/purpose, the members panel
-                    entry, the settings gear and the project's zero-write
-                    「新建会话」. The workspace-global rows below disappear on
-                    the same condition (sidebar trim); the personal sidebar
-                    never renders this block. */}
+                    entry and the settings gear. The workspace-global rows
+                    below disappear on the same condition (sidebar trim); the
+                    personal sidebar never renders this block. POO-207: the
+                    tab opens with the whole sidebar collapsed, and the header
+                    has no 「新建会话」 — the navigator header owns it. */}
                 {isEnterpriseProjectTab && activeProject && (
                   <ProjectTabSidebar
                     project={activeProject}
-                    onNewSession={handleProjectTabNewSession}
                     onProjectSaved={handleProjectSaved}
                   />
                 )}
@@ -2665,10 +2688,10 @@ function AppShellContent({
                   icon={<PanelLeftRounded className="h-4 w-4" />}
                   tooltip={t("menu.toggleSidebar")}
                   aria-label={t("menu.toggleSidebar")}
-                  aria-pressed={isSidebarVisible}
+                  aria-pressed={effectiveSidebarVisible}
                   data-testid="navigator-sidebar-toggle"
                   onClick={handleToggleSidebar}
-                  className={isSidebarVisible ? "bg-foreground/[0.06] text-foreground" : undefined}
+                  className={effectiveSidebarVisible ? "bg-foreground/[0.06] text-foreground" : undefined}
                 />
               ) : undefined}
               titleAccessory={

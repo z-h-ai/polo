@@ -15,8 +15,8 @@ import type { SidebarItem } from '../LeftSidebar'
  *   it, and the gate answers FALSE for a personal space on a project tab —
  *   the personal sidebar is untouched (the反例);
  * - the header carries the project identity (name + one-line purpose), the
- *   members entry (roster avatars + the SERVER count), the settings gear and
- *   the zero-write「新建会话」(the caller's existing enterprise routing);
+ *   members entry (roster avatars + the SERVER count) and the settings gear —
+ *   and NO「新建会话」button (POO-207: the navigator header owns new-session);
  * - the members entry opens the shared members PANEL (drawer form);
  * - the settings dialog: per-field length counters, a success toast, PATCH
  *   semantics (only changed fields travel), pm wire codes surfaced through
@@ -129,15 +129,13 @@ mock.module('sonner', () => ({
 async function renderSidebar(props: Record<string, unknown> = {}, options: { members?: Array<Record<string, unknown>> } = {}) {
   const harness = makeHarness(options)
   const { ProjectTabSidebar } = await import('../ProjectTabSidebar')
-  const onNewSession = mock(() => {})
   const onProjectSaved = mock(() => {})
   const view = render(createElement(I18nextProvider, { i18n }, createElement(ProjectTabSidebar, {
     project: activeProject(),
-    onNewSession,
     onProjectSaved,
     ...props,
   })))
-  return { harness, onNewSession, onProjectSaved, view }
+  return { harness, onProjectSaved, view }
 }
 
 beforeEach(async () => {
@@ -192,18 +190,17 @@ describe('projectTabSidebarItems (C8 R7 whitelist trim)', () => {
 // =============================================================================
 
 describe('ProjectTabSidebar header (C8 R7)', () => {
-  it('carries the project identity, the members entry with the SERVER count, the gear and「新建会话」', async () => {
-    const { onNewSession } = await renderSidebar()
+  it('carries the project identity, the members entry with the SERVER count and the gear — no「新建会话」', async () => {
+    await renderSidebar()
     await waitFor(() => expect(screen.getByTestId('project-tab-name').textContent).toBe('华东区资料库'))
     expect(screen.getByTestId('project-tab-purpose').textContent).toBe('区域销售资料与口径')
     // The roster speaks: the count is what the server sent (2 members), and
     // the avatars ride the shared entry label.
     await waitFor(() => expect(screen.getByTestId('project-tab-members-entry').textContent).toContain('成员 2'))
     expect(screen.getByTestId('project-tab-settings').getAttribute('aria-label')).toBe('项目设置')
-    expect(screen.getByTestId('project-tab-new-session').textContent).toContain('新建会话')
-
-    fireEvent.click(screen.getByTestId('project-tab-new-session'))
-    expect(onNewSession).toHaveBeenCalledTimes(1)
+    // POO-207: the duplicate is gone — the navigator (session list) header
+    // has owned new-session since POO-202.
+    expect(screen.queryByTestId('project-tab-new-session')).toBeNull()
     // The workspace-global rows are not part of this header at all.
     expect(screen.queryByTestId('nav:sources')).toBeNull()
     expect(screen.queryByTestId('nav:skills')).toBeNull()

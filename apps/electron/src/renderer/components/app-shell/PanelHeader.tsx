@@ -91,6 +91,15 @@ export interface PanelHeaderProps {
   compactTitleMenu?: React.ReactNode
   /** Optional leading action rendered before the title (e.g., back button in compact mode) */
   leadingAction?: React.ReactNode
+  /**
+   * POO-207: control(s) pinned to the header's LEFT edge — the content side —
+   * without moving the title: the centered title stays centered (the flex-1
+   * title row keeps its mx-auto centering around the leading cluster), unlike
+   * `leadingAction` which left-aligns the title after itself. Used by the
+   * chat header's focus-mode toggle (the message-side control). Ignored in
+   * compact mode (compact enumerates its own control slots explicitly).
+   */
+  startActions?: React.ReactNode
   /** Optional center button rendered between title and right actions */
   centerButton?: React.ReactNode
   /** Optional action buttons rendered on the right */
@@ -117,6 +126,7 @@ export function PanelHeader({
   titleMenu,
   compactTitleMenu,
   leadingAction: explicitLeadingAction,
+  startActions,
   centerButton,
   actions,
   rightSidebarButton,
@@ -250,6 +260,11 @@ export function PanelHeader({
        this branch today; other headers keep the trailing-title layout below. */
     <>
       <div className="flex-1 min-w-0 flex items-center">
+        {startActions && (
+          <div className="titlebar-no-drag shrink-0">
+            {startActions}
+          </div>
+        )}
         {leadingAction && (
           <div className="titlebar-no-drag shrink-0">
             {leadingAction}
@@ -282,6 +297,11 @@ export function PanelHeader({
     </>
   ) : (
     <>
+      {startActions && (
+        <div className="titlebar-no-drag shrink-0">
+          {startActions}
+        </div>
+      )}
       {leadingAction && (
         <div className="titlebar-no-drag shrink-0">
           {leadingAction}
