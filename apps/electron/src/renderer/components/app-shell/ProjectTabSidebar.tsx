@@ -1,24 +1,21 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useStore } from 'jotai'
 import { Settings2 } from 'lucide-react'
 
-import { rightPaneNativeSuspendAtom } from '@/atoms/right-pane-suspension'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
   clientWorkbenchDialogClassName,
   clientWorkbenchOverlayClassName,
   useClientWorkbenchStyle,
 } from '@/components/ui/client-workbench'
-import { ProjectMembersEntryLabel, ProjectMembersPanel } from '@/components/project-context/ProjectMembersPanel'
 import { useCollaborationRoster } from '@/components/project-context/useCollaborationRoster'
 import { ProjectSettingsView } from '@/components/projects/ProjectSettingsView'
 import type { ActiveProjectRef } from '@/components/projects/projects-bus'
 import { isSeparatorItem, type SidebarItem } from './LeftSidebar'
 
 /**
- * POO-205 C8 (R7): the ENTERPRISE PROJECT tab's sidebar identity block and
- * its two hosted surfaces.
+ * POO-205 C8 (R7), trimmed by POO-208: the ENTERPRISE PROJECT tab's sidebar
+ * identity block and its settings dialog.
  *
  * The project tab's left column is the PROJECT, not the workspace: the
  * workspace-global entries (sources / skills / automations / settings) are
@@ -28,12 +25,15 @@ import { isSeparatorItem, type SidebarItem } from './LeftSidebar'
  * already filtered to the active project) under this header:
  *
  * - identity: project name + one-line purpose;
- * - members: the roster avatars + count, opening the shared members PANEL
- *   (drawer form — the sidebar has no conversation lane to push into);
  * - settings: the gear opening the project settings dialog (the ONLY entry
  *   now that the home card lost its button, R8);
  * - conversations: the filter list AppShell keeps (`nav:allSessions` +
  *   `nav:labels`), already filtered to the active project.
+ *
+ * POO-208: the members row is GONE — the sidebar entry duplicated the
+ * header's「成员 N」button and taught two homes for the same surface; the
+ * chat header is now the single members entry. The roster hook STAYS: the
+ * settings dialog reads the member count and the viewer's role from it.
  *
  * POO-207: no 「新建会话」 here — the navigator (session list) header has
  * owned new-session since POO-202, and the duplicate button only taught two
@@ -88,12 +88,9 @@ export interface ProjectTabSidebarProps {
 
 export function ProjectTabSidebar({ project, onProjectSaved }: ProjectTabSidebarProps) {
   const { t } = useTranslation()
-  const store = useStore()
   const workbenchStyle = useClientWorkbenchStyle()
 
-  const [membersOpen, setMembersOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const membersTriggerRef = useRef<HTMLButtonElement | null>(null)
 
   const membersScope = useMemo(() => ({
     accountId: project.accountId,
@@ -102,20 +99,6 @@ export function ProjectTabSidebar({ project, onProjectSaved }: ProjectTabSidebar
     projectId: project.projectId,
   }), [project.accountId, project.organizationEnterpriseId, project.organizationProductSpaceId, project.projectId])
   const roster = useCollaborationRoster(membersScope)
-
-  // The drawer is a window modal: while it is up the native panes leave the
-  // visible layer through the shared suspension flag (same contract as the
-  // ChatPage host). Close returns focus to the members entry (P8).
-  useEffect(() => {
-    if (!membersOpen) return
-    store.set(rightPaneNativeSuspendAtom, true)
-    return () => { store.set(rightPaneNativeSuspendAtom, false) }
-  }, [membersOpen, store])
-
-  const closeMembers = useCallback(() => {
-    setMembersOpen(false)
-    window.setTimeout(() => membersTriggerRef.current?.focus(), 0)
-  }, [])
 
   const viewerRole = projectTabViewerRole(project, roster.viewerRole)
   const canManage = viewerRole === 'owner' || viewerRole === 'manager'
@@ -173,27 +156,7 @@ export function ProjectTabSidebar({ project, onProjectSaved }: ProjectTabSidebar
             {project.purpose}
           </p>
         ) : null}
-        <button
-          type="button"
-          ref={membersTriggerRef}
-          data-testid="project-tab-members-entry"
-          aria-haspopup="dialog"
-          aria-expanded={membersOpen}
-          onClick={() => setMembersOpen(true)}
-          className="mt-[6px] inline-flex h-7 w-full items-center gap-1.5 rounded-[6px] px-1.5 text-left text-[12px] font-medium text-muted-foreground transition-colors hover:bg-sidebar-hover hover:text-foreground focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
-        >
-          <ProjectMembersEntryLabel roster={roster} />
-        </button>
       </div>
-
-      <ProjectMembersPanel
-        open={membersOpen}
-        mode="drawer"
-        scope={membersScope}
-        projectName={project.name}
-        roster={roster}
-        onClose={closeMembers}
-      />
 
       <Dialog open={settingsOpen} onOpenChange={(open) => { if (!open) setSettingsOpen(false) }}>
         <DialogContent

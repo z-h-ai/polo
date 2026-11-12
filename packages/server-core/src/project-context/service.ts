@@ -1,6 +1,12 @@
 import { getProductSpaceContextStorage } from '@polo-ai/shared/config'
 import type { TrustedProductSpaceSummary } from '@polo-ai/shared/product-spaces'
-import type { ProjectAssetReference } from '@polo-ai/shared/protocol'
+import type {
+  PcScanFolderInput,
+  PcScanFolderResponse,
+  PcStageZipBatchInput,
+  PcStagedZipBatchResponse,
+  ProjectAssetReference,
+} from '@polo-ai/shared/protocol'
 import {
   PcCreateAssetInputSchema,
   PcCreateUploadInputSchema,
@@ -33,6 +39,8 @@ import {
   downloadProjectContextFile,
   type ProjectContextAdmin,
 } from './admin-client'
+import { cleanupStagedBatch, stageZipBatch } from './batch-staging'
+import { scanFolderBatch } from './batch-source'
 
 /**
  * POO-196 project-context service — the client-side composition layer
@@ -783,4 +791,96 @@ export async function resolveSessionProjectContext(
     deps.platform.logger?.warn(`PC_SEND_REFERENCES: resolution failed: ${error instanceof Error ? error.message : String(error)}`)
     return undefined
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* POO-210 batch upload staging                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The zip unpack + folder scan that build the batch upload entry list, and
+ * the cleanup for the staging they write.
+ *
+ * Transport-layer only: nothing here touches the PC admin contract — these
+ * are LOCAL channels whose error codes (`pc_stage_*`) are a CLIENT-side
+ * vocabulary mapped to copy in the renderer, NOT new PC_ERROR_CODES entries
+ * (that list governs the admin HTTP surface and stays untouched).
+ *
+ * The scope gate matches the upload it feeds: same trusted fence, requested
+ * space/project must be current, and the space must be writable — staging
+ * exists solely to produce upload candidates.
+ */
+
+const BATCH_MAX_ENTRY_BYTES_CEILING = 10 * 1024 * 1024 * 1024
+
+function batchMaxEntryBytes(requested: unknown): number {
+  const value = typeof requested === 'number' && Number.isFinite(requested) ? Math.floor(requested) : 0
+  if (value < 1) throw pcError('pc_validation_error', 'maxEntryBytes must be a positive integer')
+  return Math.min(value, BATCH_MAX_ENTRY_BYTES_CEILING)
+}
+
+/** The staging failure → LOCAL pc_stage_* code. These codes live in
+ * `PC_LOCAL_ERROR_CODES` (the client's own boundary list) — the admin wire
+ * contract is untouched. */
+function batchSourceError(failure: string): Error {
+  const codeOf: Record<string, string> = {
+    zip_too_large: 'pc_stage_zip_too_large',
+    zip_bomb: 'pc_stage_zip_bomb',
+    not_a_zip: 'pc_stage_zip_invalid',
+    read_failed: 'pc_stage_read_failed',
+    stage_failed: 'pc_stage_write_failed',
+  }
+  return pcError(codeOf[failure] ?? 'pc_stage_read_failed')
+}
+
+export async function pcStageZipBatch(
+  deps: HandlerDeps,
+  ctx: RequestContext,
+  input: PcStageZipBatchInput,
+): Promise<PcStagedZipBatchResponse> {
+  const scope = await requireProjectContextScope(ctx, input.workspaceId, deps)
+  assertRequestedSpace(scope, input.productSpaceId)
+  assertRequestedProject(input.projectId)
+  assertWritable(scope)
+  const result = await stageZipBatch(input.zipPath, { maxEntryBytes: batchMaxEntryBytes(input.maxEntryBytes) })
+  if (!result.ok) {
+    deps.platform.logger?.warn(`PC_STAGE_ZIP: ${result.failure} (${input.zipPath})`)
+    throw batchSourceError(result.failure)
+  }
+  return result.batch
+}
+
+export async function pcScanFolder(
+  deps: HandlerDeps,
+  ctx: RequestContext,
+  input: PcScanFolderInput,
+): Promise<PcScanFolderResponse> {
+  const scope = await requireProjectContextScope(ctx, input.workspaceId, deps)
+  assertRequestedSpace(scope, input.productSpaceId)
+  assertRequestedProject(input.projectId)
+  assertWritable(scope)
+  const result = await scanFolderBatch(input.folderPath, { maxEntryBytes: batchMaxEntryBytes(input.maxEntryBytes) })
+  if (!result.ok) {
+    deps.platform.logger?.warn(`PC_SCAN_FOLDER: ${result.failure} (${input.folderPath})`)
+    throw batchSourceError(result.failure)
+  }
+  return {
+    // Folder scans stage nothing: the upload RPC streams straight from the
+    // original file, so stagedPath IS the source path (same contract as zip
+    // staging, where it points at the generated staging file instead).
+    entries: result.entries.map((entry) => ({ ...entry, entryId: `${entry.sourcePath}:${entry.sizeBytes}`, stagedPath: entry.sourcePath })),
+    truncated: result.truncated,
+  }
+}
+
+export async function pcStageCleanup(
+  _deps: HandlerDeps,
+  _ctx: RequestContext,
+  input: { batchId: string },
+): Promise<{ cleaned: boolean }> {
+  // Deliberately scope-free: a batchId only ever names a directory INSIDE
+  // the staging root (format-checked in cleanupStagedBatch), so the worst a
+  // stale or foreign caller can do is remove its own temp debris.
+  const cleaned = await cleanupStagedBatch(input.batchId)
+  return { cleaned }
 }

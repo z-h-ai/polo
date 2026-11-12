@@ -1488,6 +1488,14 @@ export interface ElectronAPI {
   pcSearchAssets(input: import('@polo-ai/shared/protocol').PcSearchAssetsInput): Promise<import('@polo-ai/shared/protocol').PcSearchResponse>
   pcRebuild(input: import('@polo-ai/shared/protocol').PcRebuildInput): Promise<import('@polo-ai/shared/protocol').PcRebuildResponse>
 
+  // POO-210 batch upload staging (LOCAL_ONLY): builds the batch entry list
+  // from a zip (unpacking included entries into a private staging dir) or a
+  // folder scan, and cleans a staged batch up. The entries feed the SAME
+  // pcUploadFile RPC — one call per included entry.
+  pcStageZipBatch(input: import('@polo-ai/shared/protocol').PcStageZipBatchInput): Promise<import('@polo-ai/shared/protocol').PcStagedZipBatchResponse>
+  pcScanFolder(input: import('@polo-ai/shared/protocol').PcScanFolderInput): Promise<import('@polo-ai/shared/protocol').PcScanFolderResponse>
+  pcStageCleanup(input: import('@polo-ai/shared/protocol').PcStageCleanupInput): Promise<import('@polo-ai/shared/protocol').PcStageCleanupResponse>
+
   // Projects & project members (POO-205, supersedes the POO-196 追加轮
   // surface). Creating a project is lightweight inside the committed
   // organization (no payer, no payment responsibility); members are picked

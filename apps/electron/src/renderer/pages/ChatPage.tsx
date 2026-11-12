@@ -549,11 +549,13 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       />
     )
     : null
-  // P9 header entry (U7 button): 「成员 N」 with up to three roster avatars,
-  // a trailing add-member glyph for owner/manager, ≥32px tall with a border
-  // + light fill. The roster-unknown fallback is the plain icon + label —
-  // never a fabricated count. D11 keeps the pc-members-button testid and the
-  // uniqueness: the tab strip no longer carries any members affordance.
+  // P9 header entry (POO-208 re-adjudicated U7): 「成员 N」 with up to three
+  // roster avatars, in the header's ghost system — no border, no fill, dimmed
+  // at rest and full-strength on hover, same as the icon buttons beside it;
+  // the add-member affordance lives in the panel, not on the entry. The
+  // roster-unknown fallback is the plain icon + label — never a fabricated
+  // count. D11 keeps the pc-members-button testid and the uniqueness: the tab
+  // strip no longer carries any members affordance.
   // (The roster/role computation lives with the host hook above.)
   const membersEntryButton = showProjectTabs ? (
     <button
@@ -564,9 +566,9 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       aria-haspopup="dialog"
       aria-expanded={membersPanelHost.open}
       onClick={handleOpenProjectMembers}
-      className="inline-flex h-8 min-h-[32px] shrink-0 items-center gap-1.5 rounded-[6px] border border-border bg-foreground-5 px-2 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+      className="inline-flex h-8 min-h-[32px] shrink-0 items-center gap-1.5 rounded-[6px] bg-background px-2 text-[12px] font-medium text-muted-foreground shadow-minimal opacity-70 transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
     >
-      <ProjectMembersEntryLabel roster={membersRoster} showInviteAffordance={membersCanInvite} />
+      <ProjectMembersEntryLabel roster={membersRoster} />
     </button>
   ) : null
   // X6: both project panes stay MOUNTED (hidden) across tab flips, so a
@@ -1053,27 +1055,36 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   // startActions is a desktop-only slot).
   const actionRegistry = useOptionalActionRegistry()
   const isFocusMode = useAtomValue(workbenchFocusModeAtom) === true
+  // POO-209: an active toggle must not keep advertising "切换" — while focus
+  // mode is on the button offers the way out (退出专注模式), with the same
+  // pressed treatment as the other header toggles (filter: bg tint + tinted
+  // shadow; sidebar: aria-pressed).
+  const focusModeLabel = isFocusMode ? t('menu.exitFocusMode') : t('menu.toggleFocusMode')
   const focusModeButton = React.useMemo(() => {
     if (isCompactMode) return undefined
     return (
       <PanelHeaderCenterButton
         icon={<Focus className="h-4 w-4" />}
-        tooltip={t('menu.toggleFocusMode')}
+        tooltip={focusModeLabel}
+        aria-label={focusModeLabel}
         aria-pressed={isFocusMode}
         data-testid="chat-focus-toggle"
         onClick={() => actionRegistry?.execute('view.toggleFocusMode')}
-        className={isFocusMode ? 'text-accent opacity-100' : undefined}
+        className={isFocusMode ? 'bg-accent/10 text-accent opacity-100 shadow-tinted' : undefined}
       />
     )
-  }, [isCompactMode, isFocusMode, actionRegistry, t])
+  }, [isCompactMode, isFocusMode, focusModeLabel, actionRegistry])
 
+  // gap-1.5 matches the PanelHeader actions-row spacing: the ghost members
+  // entry lost its border, so without an explicit gap the two buttons read
+  // as one glued blob.
   const headerActions = isCompactMode ? (
-    <div className="flex items-center">
+    <div className="flex items-center gap-1.5">
       {membersEntryButton}
       {compactInfoButton}
     </div>
   ) : (
-    <div className="flex items-center">
+    <div className="flex items-center gap-1.5">
       {membersEntryButton}
       {shareButton}
     </div>

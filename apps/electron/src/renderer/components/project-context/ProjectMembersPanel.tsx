@@ -882,15 +882,13 @@ export function ProjectMembersPanel({
   )
 }
 
-/** The header entry「成员 N」(P9, U7 button): up to three roster avatars ahead
- * of the count, a trailing add-member glyph for owner/manager (aria-hidden —
- * the WHOLE button is the one target and its accessible name carries the
- * add capability, never the glyph alone); a roster that has not spoken yet
- * degrades to the plain icon + label — never a fabricated 0. Lives in
- * ChatPage/EmptyState header actions. */
-export function ProjectMembersEntryLabel({ roster, showInviteAffordance = false }: {
+/** The header entry「成员 N」(P9; POO-208 re-adjudicated U7 — the invite
+ * affordance lives in the PANEL, not on the entry): up to three roster
+ * avatars ahead of the count; a roster that has not spoken yet degrades to
+ * the plain icon + label — never a fabricated 0. Lives in ChatPage/EmptyState
+ * header actions; the host owns the ghost chrome. */
+export function ProjectMembersEntryLabel({ roster }: {
   roster: ReturnType<typeof useCollaborationRoster>
-  showInviteAffordance?: boolean
 }) {
   const { t } = useTranslation()
   const members = roster.members.slice(0, 3)
@@ -920,9 +918,6 @@ export function ProjectMembersEntryLabel({ roster, showInviteAffordance = false 
           ? t('projectMembers.entryCount', { count: roster.totalActiveMembers })
           : t('projectMembers.buttonLabel')}
       </span>
-      {showInviteAffordance ? (
-        <UserPlus className="size-3.5 shrink-0" aria-hidden="true" data-testid="pc-members-entry-plus" />
-      ) : null}
     </>
   )
 }
