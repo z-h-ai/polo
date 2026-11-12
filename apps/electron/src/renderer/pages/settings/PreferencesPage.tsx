@@ -11,10 +11,12 @@
 import * as React from 'react'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import { PanelHeader } from '@/components/app-shell/PanelHeader'
 import { HeaderMenu } from '@/components/ui/HeaderMenu'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { routes } from '@/lib/navigate'
+import { isValidTimezoneInput } from '@/lib/timezone'
 import { Spinner } from '@polo-ai/ui'
 import {
   SettingsSection,
@@ -87,10 +89,19 @@ export default function PreferencesPage() {
   const [formState, setFormState] = useState<PreferencesFormState>(emptyFormState)
   const [isLoading, setIsLoading] = useState(true)
   const [preferencesPath, setPreferencesPath] = useState<string | null>(null)
+  // Inline hint shown when the typed timezone doesn't look like a valid zone
+  const [timezoneError, setTimezoneError] = useState(false)
+  // Inline banner + toast when auto-save fails, so users don't assume it saved
+  const [saveError, setSaveError] = useState(false)
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isInitialLoadRef = useRef(true)
   const formStateRef = useRef(formState)
   const lastSavedRef = useRef<string | null>(null)
+  // Latest translator for the one-time unmount save handler
+  const tRef = useRef(t)
+  useEffect(() => {
+    tRef.current = t
+  }, [t])
 
   // Keep formStateRef in sync for use in cleanup
   useEffect(() => {
@@ -137,11 +148,17 @@ export default function PreferencesPage() {
         const result = await window.electronAPI.writePreferences(json)
         if (result.success) {
           lastSavedRef.current = json
+          // Recovered from an earlier failure — clear the error quietly
+          setSaveError(false)
         } else {
           console.error('Failed to save preferences:', result.error)
+          setSaveError(true)
+          toast.error(t('settings.preferences.saveFailed'))
         }
       } catch (err) {
         console.error('Failed to save preferences:', err)
+        setSaveError(true)
+        toast.error(t('settings.preferences.saveFailed'))
       }
     }, 500)
 
@@ -150,7 +167,7 @@ export default function PreferencesPage() {
         clearTimeout(saveTimeoutRef.current)
       }
     }
-  }, [formState, isLoading])
+  }, [formState, isLoading, t])
 
   // Force save on unmount if there are unsaved changes
   useEffect(() => {
@@ -166,6 +183,8 @@ export default function PreferencesPage() {
         // Fire and forget - we can't await in cleanup
         window.electronAPI.writePreferences(currentJson).catch((err) => {
           console.error('Failed to save preferences on unmount:', err)
+          // The page is gone, but a toast still tells the user the edit was lost
+          toast.error(tRef.current('settings.preferences.saveFailed'))
         })
       }
     }
@@ -189,6 +208,11 @@ export default function PreferencesPage() {
   return (
     <div className="h-full flex flex-col">
       <PanelHeader title={t("settings.preferences.title")} actions={<HeaderMenu route={routes.view.settings('preferences')} helpFeature="preferences" />} />
+      {saveError && (
+        <div className="px-5 pt-3 max-w-3xl mx-auto w-full">
+          <p className="text-sm text-destructive">{t("settings.preferences.saveFailed")}</p>
+        </div>
+      )}
       <div className="flex-1 min-h-0 mask-fade-y">
         <ScrollArea className="h-full">
           <div className="px-5 py-7 max-w-3xl mx-auto space-y-8">
@@ -210,8 +234,13 @@ export default function PreferencesPage() {
                 label={t("settings.preferences.timezone")}
                 description={t("settings.preferences.timezoneDesc")}
                 value={formState.timezone}
-                onChange={(v) => updateField('timezone', v)}
+                onChange={(v) => {
+                  setTimezoneError(false)
+                  updateField('timezone', v)
+                }}
+                onBlur={() => setTimezoneError(!isValidTimezoneInput(formState.timezone))}
                 placeholder={t("settings.preferences.timezonePlaceholder")}
+                error={timezoneError ? t("settings.preferences.timezoneInvalid") : undefined}
                 inCard
               />
             </SettingsCard>

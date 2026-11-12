@@ -238,6 +238,7 @@ export default function AppSettingsPage() {
                     <>
                       <SettingsInput
                         label={t("settings.network.httpProxyLabel")}
+                        description={t("settings.network.httpProxyInputDesc")}
                         value={proxyForm.httpProxy}
                         onChange={(value) => setProxyForm(prev => ({ ...prev, httpProxy: value }))}
                         placeholder={t("settings.network.proxyPlaceholder")}
@@ -245,6 +246,7 @@ export default function AppSettingsPage() {
                       />
                       <SettingsInput
                         label={t("settings.network.httpsProxyLabel")}
+                        description={t("settings.network.httpsProxyInputDesc")}
                         value={proxyForm.httpsProxy}
                         onChange={(value) => setProxyForm(prev => ({ ...prev, httpsProxy: value }))}
                         placeholder={t("settings.network.proxyPlaceholder")}
@@ -252,6 +254,7 @@ export default function AppSettingsPage() {
                       />
                       <SettingsInput
                         label={t("settings.network.bypassRules")}
+                        description={t("settings.network.bypassRulesDesc")}
                         value={proxyForm.noProxy}
                         onChange={(value) => setProxyForm(prev => ({ ...prev, noProxy: value }))}
                         placeholder={t("settings.network.bypassPlaceholder")}
