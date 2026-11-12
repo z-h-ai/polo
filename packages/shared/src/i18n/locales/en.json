@@ -3319,6 +3319,7 @@
   "workspace.nameLabel": "Workspace name",
   "workspace.newWorkspaceName": "New workspace name",
   "workspace.noFolderSelected": "No folder selected",
+  "workspace.noWorkspacesYet": "No workspaces yet — create your first one below",
   "workspace.olderServerWarning": "This server is running an older version. Some features like remote directory browsing may not work correctly. Update the server for full functionality.",
   "workspace.openFolder": "Open folder",
   "workspace.openFolderDesc": "Choose an existing folder as workspace.",

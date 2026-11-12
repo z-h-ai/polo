@@ -3319,6 +3319,7 @@
   "workspace.nameLabel": "ワークスペース名",
   "workspace.newWorkspaceName": "新しいWorkspace名",
   "workspace.noFolderSelected": "フォルダが選択されていません",
+  "workspace.noWorkspacesYet": "Workspaceがまだありません。下で最初のWorkspaceを作成しましょう",
   "workspace.olderServerWarning": "このサーバーは古いバージョンで動作しています。リモートディレクトリの参照など一部の機能が正しく動作しない場合があります。すべての機能を利用するにはサーバーをアップデートしてください。",
   "workspace.openFolder": "フォルダを開く",
   "workspace.openFolderDesc": "既存のフォルダをWorkspaceとして選択します。",

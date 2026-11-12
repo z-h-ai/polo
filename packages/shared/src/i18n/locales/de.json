@@ -3319,6 +3319,7 @@
   "workspace.nameLabel": "Name des Arbeitsbereichs",
   "workspace.newWorkspaceName": "Name des neuen Workspaces",
   "workspace.noFolderSelected": "Kein Ordner ausgewählt",
+  "workspace.noWorkspacesYet": "Noch keine Workspaces – erstelle unten deinen ersten",
   "workspace.olderServerWarning": "Dieser Server verwendet eine ältere Version. Einige Funktionen wie das Durchsuchen von Remote-Verzeichnissen funktionieren möglicherweise nicht korrekt. Aktualisieren Sie den Server für den vollen Funktionsumfang.",
   "workspace.openFolder": "Ordner öffnen",
   "workspace.openFolderDesc": "Vorhandenen Ordner als Workspace wählen.",

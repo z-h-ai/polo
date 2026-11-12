@@ -3319,6 +3319,7 @@
   "workspace.nameLabel": "Nombre del espacio de trabajo",
   "workspace.newWorkspaceName": "Nombre del nuevo Workspace",
   "workspace.noFolderSelected": "Ninguna carpeta seleccionada",
+  "workspace.noWorkspacesYet": "Aún no hay Workspaces. Crea el primero abajo.",
   "workspace.olderServerWarning": "Este servidor está ejecutando una versión anterior. Algunas funciones como la exploración de directorios remotos pueden no funcionar correctamente. Actualiza el servidor para tener todas las funcionalidades.",
   "workspace.openFolder": "Abrir carpeta",
   "workspace.openFolderDesc": "Elige una carpeta existente como Workspace.",

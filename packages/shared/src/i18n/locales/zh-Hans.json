@@ -3319,6 +3319,7 @@
   "workspace.nameLabel": "工作区名称",
   "workspace.newWorkspaceName": "新 Workspace 名称",
   "workspace.noFolderSelected": "未选择文件夹",
+  "workspace.noWorkspacesYet": "还没有工作区，在下方创建第一个",
   "workspace.olderServerWarning": "此服务器运行的是旧版本。某些功能 (如远程目录浏览) 可能无法正常工作。请更新服务器以获得完整功能。",
   "workspace.openFolder": "打开文件夹",
   "workspace.openFolderDesc": "选择现有文件夹作为 Workspace。",

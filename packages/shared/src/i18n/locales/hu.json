@@ -3319,6 +3319,7 @@
   "workspace.nameLabel": "Munkaterület neve",
   "workspace.newWorkspaceName": "Új munkaterület neve",
   "workspace.noFolderSelected": "Nincs mappa kiválasztva",
+  "workspace.noWorkspacesYet": "Még nincs munkaterület – hozd létre az elsőt lentebb",
   "workspace.olderServerWarning": "Ez a szerver egy régebbi verziót futtat. Egyes funkciók, például a távoli könyvtárböngészés, esetleg nem működnek megfelelően. Frissítsd a szervert a teljes funkcionalitáshoz.",
   "workspace.openFolder": "Mappa megnyitása",
   "workspace.openFolderDesc": "Válassz egy meglévő mappát munkaterületként.",
