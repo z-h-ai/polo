@@ -7,7 +7,7 @@ import path from 'node:path'
 
 import { AdminClient, AdminError } from '@polo-ai/shared/admin'
 import { getAdminUrl } from '@polo-ai/shared/config'
-import { getCredentialManager } from '@polo-ai/shared/credentials'
+import { getCredentialManager, type CredentialManager } from '@polo-ai/shared/credentials'
 import type {
   PcCapabilitiesResponse,
   PcCompleteUploadResponse,
@@ -121,7 +121,8 @@ async function withAdmin<T>(run: (client: AdminClient, accessToken: string) => P
     tokenStore: {
       async getRefreshToken() {
         const current = await getCredentialManager().getAdminTokens()
-        return current?.userId === accountId ? current.refreshToken : null
+        if (!current || current.userId !== accountId) return null
+        return current.refreshToken
       },
       async onTokensRefreshed(refreshed) {
         const current = await getCredentialManager().getAdminTokens()

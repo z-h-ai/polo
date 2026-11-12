@@ -42,11 +42,11 @@
     "typecheck_exit": 0,
     "vite_exit": 0
   },
-  "input_fingerprint": "0bbe0758cd206e95e5af1dfb5c32ec2c7e15306403b9824795eac08f763840e8",
+  "input_fingerprint": "62e714143a8dbdc54c589d7883594748c5775e5921b615a77940f224d51a5fd0",
   "inputs": {
     "lockfiles": {
-      "bun.lock": "c086f2f3050dd2232064cc9d8f0738a067292df63739588c7d643af871043c79",
-      "package.json": "da2a023f226ca277e6f8d3c71376aa0c9c181a0f12b651f8d80165aee2c0f9ab"
+      "bun.lock": "e25c296533675166af8569a1ce0be7b760e346da218672e77e33a47be2ee264e",
+      "package.json": "9fd9aee6379c045829b21210929c538da2c40bc492042b76296083b7a17c6491"
     },
     "note": "repo_files hold the WORKING TREE contents actually consumed by the build (hashes prove currency — a changed file cannot match). packages/lockfiles record the dependency set vite resolved. references/design-system.json is intentionally NOT an input: it binds upstream sources; material outputs are downstream. Only the revision string is fingerprinted, avoiding model/output cycles.",
     "packages": {},
@@ -5850,7 +5850,7 @@
       ".agents/skills/polo-client-design-system/tools/source-baseline/entries/fixtures.tsx": "e57f5c8e9d877e0466c4f3cc4981c15d443b6fbd060d5204b485035b3799b3ae",
       ".agents/skills/polo-client-design-system/tools/source-baseline/entries/gallery.tsx": "3718396018601dae4af76f4fb9b9820dfc29628e748fd83f9d8c3c54208163fc",
       ".agents/skills/polo-client-design-system/tools/source-baseline/entries/scenes.tsx": "4f3d1a4c1400b9c6ddebe67f7647e3fab12fb74851dc1bc19413994296c38429",
-      "apps/electron/package.json": "e34e4f0239b28b7edf3a6e8207d7c600f27bc53dc1c48ff72eba970454b74642",
+      "apps/electron/package.json": "f44cd893fd9cd30fa85488d2ffbb9cddad47771f3da366bd99003cd4e1246b25",
       "apps/electron/resources/icon.png": "5fe6f3ac7876d19aaf0f1080833a9dba4ea91a5ffe0d9833666a370ff7837005",
       "apps/electron/resources/themes/catppuccin.json": "a3c8cc47ba1fcdf284ff7a3c23b108ecd39640b2a43edd6545b6095a6c43cf02",
       "apps/electron/resources/themes/default.json": "77ee715b277abf7a28d6d6a34e9967989cf403b81b561ea52e57a431b1ad15da",
@@ -6592,8 +6592,8 @@
       "apps/electron/src/shared/tab-browser-partition.ts": "40d9016b8d0b6350c3afb5fb4d40f28180a96b189e2699eb37529a8048ab7f28",
       "apps/electron/src/shared/tab-browser-types.ts": "d045907da9b899ade4156fbdf9922c49ef6b431edf636b8f654bd24a2ad23459",
       "apps/electron/src/shared/types.ts": "6f3fa4d7f730f6cf4fb79559b37f7569a91627050abae65e0d71c8352f2ed32f",
-      "package.json": "da2a023f226ca277e6f8d3c71376aa0c9c181a0f12b651f8d80165aee2c0f9ab",
-      "packages/shared/package.json": "806e05a2933305674f082e6c0cc410608fffc5c99db6bc0c52c6cae60c393a76",
+      "package.json": "9fd9aee6379c045829b21210929c538da2c40bc492042b76296083b7a17c6491",
+      "packages/shared/package.json": "acb0931ba1c51cb436a03306980332533079988afb760864d5e7007efe8f1048",
       "packages/shared/src/config/llm-connections.ts": "0e6384c4dac4fea6e557cb300614a7c2204c2dead27b45698c47e20ccc1eee4f",
       "packages/shared/src/config/models.ts": "224e417638b70447745a5df96c8466413b799fee4295f22e7a3142823c7761f3",
       "packages/shared/src/config/theme.ts": "910d8d7e24d21aba3b8da184c17037fb4115e1addbf0a40646070b00d149d1b5",
@@ -6951,7 +6951,7 @@
   ],
   "schema_version": 2,
   "snapshot": {
-    "head": "1d0807461203f4330bbc868c57dc8c80841d7d1e",
+    "head": "95aad7aa000e570e4daae0be564b2422a567e5cc",
     "head_dirty": [],
     "note": "Input state at the time the inputs LAST changed (git head plus uncommitted/untracked input paths of THIS build). Currency is proven by inputs hashes + regeneration, not by comparing this snapshot to the current git state."
   }
