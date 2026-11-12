@@ -432,6 +432,34 @@ export function ProjectFileLibrary({ scope, currentUserId, active = true, pinMut
     void refresh()
   }
 
+  // POO-210 batch mode: the per-entry write is the SAME create RPC minus the
+  // dialog-closing side effects — the checklist keeps running between entries
+  // and reports once, via onBatchSettled.
+  const handleBatchEntrySubmit = async (input: AssetUploadInput) => {
+    const activeScope = scopeRef.current
+    const result = await window.electronAPI.pcUploadFile({
+      workspaceId: activeScope.workspaceId,
+      productSpaceId: activeScope.productSpaceId,
+      projectId: activeScope.projectId,
+      mode: 'create',
+      filePath: input.filePath,
+      name: input.name,
+      tags: input.tags,
+      source: input.source,
+      sizeBytes: input.sizeBytes,
+      mime: input.mime,
+      checksumSha256: input.checksumSha256,
+    })
+    upsertAsset(result.asset)
+  }
+
+  const handleBatchSettled = (totals: { succeeded: number; failed: number }) => {
+    if (totals.succeeded > 0) {
+      toast.success(t('projectContext.toast.batchUploaded', { count: totals.succeeded }))
+    }
+    void refresh()
+  }
+
   const handleReplaceSubmit = async (input: import('@polo-ai/shared/protocol').PcUploadFileInput) => {
     const activeScope = scopeRef.current
     const result = await window.electronAPI.pcUploadFile({ ...input, workspaceId: activeScope.workspaceId, productSpaceId: activeScope.productSpaceId, projectId: activeScope.projectId })
@@ -643,6 +671,9 @@ export function ProjectFileLibrary({ scope, currentUserId, active = true, pinMut
         maxUploadBytes={maxUploadBytes}
         onClose={() => setUploadOpen(false)}
         onSubmit={handleUploadSubmit}
+        scope={scopeRef.current}
+        onBatchEntry={handleBatchEntrySubmit}
+        onBatchSettled={handleBatchSettled}
       />
 
       <AssetReplaceDialog

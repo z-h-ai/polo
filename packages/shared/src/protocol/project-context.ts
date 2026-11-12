@@ -248,13 +248,22 @@ export type PcRebuildInput = z.output<typeof PcRebuildInputSchema>
 /* ------------------------------------------------------------------ */
 
 /**
+ * D5's submit budget: the batch checklist's DEFAULT selection never exceeds
+ * this many entries. The overflow stays listed and unchecked — the caller
+ * explains (`defaultedDown`), never silently drops.
+ */
+export const PC_BATCH_SUBMIT_MAX = 500
+
+/**
  * The batch upload entry list (zip unpack / folder scan). Deliberately NOT
  * part of the admin project-context contract: staging happens entirely on
  * the trusted local side — the admin never sees a batch, only the resulting
  * `pcUploadFile` calls, one per entry, in the unchanged single-file shape.
  * `reason` is the stable exclusion vocabulary the renderer maps to copy;
- * `stagedPath` is a real local file ("" for excluded entries) the upload
- * RPC streams — a zip entry name never becomes a filesystem path here.
+ * `stagedPath` is a real local file the upload RPC streams ("" for entries
+ * that cannot be uploaded at all) — a zip entry name never becomes a
+ * filesystem path here. A zip batch's LAST entry is the archive itself
+ * (D3c): `included: false`, uploading the original file if the user checks it.
  */
 export const PC_BATCH_EXCLUSION_REASONS = [
   'hidden',
