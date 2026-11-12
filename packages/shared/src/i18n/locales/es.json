@@ -3227,6 +3227,7 @@
   "topbar.nav.stop": "Detener carga",
   "topbar.notifications.empty": "No hay notificaciones nuevas",
   "topbar.notifications.label": "Notificaciones",
+  "topbar.notifications.viewAllSessions": "Ver todas las sesiones",
   "topbar.tabs.ariaLabel": "Pestañas de apps",
   "topbar.tabs.close": "Cerrar {{title}}",
   "transport.authFailed": "Autenticación fallida. Verifica POLO_AI_SERVER_TOKEN.",

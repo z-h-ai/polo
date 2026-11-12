@@ -3227,6 +3227,7 @@
   "topbar.nav.stop": "Betöltés leállítása",
   "topbar.notifications.empty": "Nincsenek új értesítések",
   "topbar.notifications.label": "Értesítések",
+  "topbar.notifications.viewAllSessions": "Összes munkamenet megtekintése",
   "topbar.tabs.ariaLabel": "Alkalmazásfülek",
   "topbar.tabs.close": "{{title}} bezárása",
   "transport.authFailed": "Hitelesítés sikertelen. Ellenőrizd a POLO_AI_SERVER_TOKEN értékét.",

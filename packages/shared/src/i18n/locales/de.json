@@ -3227,6 +3227,7 @@
   "topbar.nav.stop": "Laden abbrechen",
   "topbar.notifications.empty": "Keine neuen Benachrichtigungen",
   "topbar.notifications.label": "Benachrichtigungen",
+  "topbar.notifications.viewAllSessions": "Alle Sitzungen anzeigen",
   "topbar.tabs.ariaLabel": "App-Tabs",
   "topbar.tabs.close": "{{title}} schließen",
   "transport.authFailed": "Authentifizierung fehlgeschlagen. POLO_AI_SERVER_TOKEN überprüfen.",

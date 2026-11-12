@@ -3227,6 +3227,7 @@
   "topbar.nav.stop": "停止加载",
   "topbar.notifications.empty": "暂无新通知",
   "topbar.notifications.label": "通知",
+  "topbar.notifications.viewAllSessions": "查看全部会话",
   "topbar.tabs.ariaLabel": "应用标签",
   "topbar.tabs.close": "关闭 {{title}}",
   "transport.authFailed": "身份验证失败，请检查 POLO_AI_SERVER_TOKEN。",

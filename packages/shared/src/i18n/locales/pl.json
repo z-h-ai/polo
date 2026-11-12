@@ -3241,6 +3241,7 @@
   "topbar.nav.stop": "Zatrzymaj ładowanie",
   "topbar.notifications.empty": "Brak nowych powiadomień",
   "topbar.notifications.label": "Powiadomienia",
+  "topbar.notifications.viewAllSessions": "Pokaż wszystkie sesje",
   "topbar.tabs.ariaLabel": "Karty aplikacji",
   "topbar.tabs.close": "Zamknij {{title}}",
   "transport.authFailed": "Uwierzytelnienie nie powiodło się. Sprawdź POLO_AI_SERVER_TOKEN.",
