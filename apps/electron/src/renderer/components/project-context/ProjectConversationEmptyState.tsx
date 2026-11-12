@@ -336,9 +336,9 @@ export function ProjectConversationEmptyState({
               aria-haspopup="dialog"
               aria-expanded={membersPanelHost.open}
               onClick={membersPanelHost.openPanel}
-              className="inline-flex h-8 min-h-[32px] shrink-0 items-center gap-1.5 rounded-[6px] border border-border bg-foreground-5 px-2 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+              className="inline-flex h-8 min-h-[32px] shrink-0 items-center gap-1.5 rounded-[6px] bg-background px-2 text-[12px] font-medium text-muted-foreground shadow-minimal opacity-70 transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             >
-              <ProjectMembersEntryLabel roster={membersRoster} showInviteAffordance={membersCanInvite} />
+              <ProjectMembersEntryLabel roster={membersRoster} />
             </button>
           ) : undefined}
         />
