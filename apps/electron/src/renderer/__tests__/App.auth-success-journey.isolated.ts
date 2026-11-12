@@ -352,6 +352,8 @@ async function passwordLogin() {
   await waitFor(() => expect(screen.getByLabelText('Phone number or username')).toBeTruthy())
   fireEvent.change(screen.getByLabelText('Phone number or username'), { target: { value: 'unit-user' } })
   fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'unit-password' } })
+  // Explicit consent: the agreement starts unchecked and gates the submit.
+  fireEvent.click(screen.getByRole('checkbox'))
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Continue' })) })
 }
 function assertNotReady() {

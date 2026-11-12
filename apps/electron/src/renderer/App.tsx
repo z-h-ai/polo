@@ -339,6 +339,10 @@ export default function App() {
     personalId: string | null
   }>({ accountId: null, activeId: null, personalId: null })
   const [setupNeeds, setSetupNeeds] = useState<SetupNeeds | null>(null)
+  // Space-select gate logout: keeps the gate mounted (no error-screen flash)
+  // while the trusted logout runs. Success flips to 'onboarding' inside
+  // handleAdminLogout; failure stays here with the toast as the error face.
+  const [isLoggingOutFromSpaceSelect, setIsLoggingOutFromSpaceSelect] = useState(false)
 
   // Per-session Jotai atom setters for isolated updates
   // NOTE: No sessionsAtom - we don't store a Session[] array anywhere to prevent memory leaks
@@ -3854,16 +3858,20 @@ export default function App() {
               account={currentAdminUser
                 ? { displayName: currentAdminUser.displayName ?? '', username: currentAdminUser.username ?? '' }
                 : null}
-              submitting={productSpace.pendingSwitch !== null}
+              submitting={productSpace.pendingSwitch !== null || isLoggingOutFromSpaceSelect}
               onConfirm={handleSpaceSelectConfirm}
               onLogout={() => {
                 productSpaceRef.current.cancelSwitch()
                 setSpaceSelectTarget(null)
                 adminAuthCompletion.cancel()
                 onboarding.handleAdminRelogin()
-                // If trusted logout/revocation fails, keep recovery available.
-                setAppState('space-error')
-                void handleAdminLogout()
+                // UX: enter the logout flow immediately and STAY on this gate —
+                // the previous `setAppState('space-error')` here flashed the
+                // "workspace unavailable" error screen before every logout.
+                // Success switches to 'onboarding' inside handleAdminLogout;
+                // a failed logout keeps this gate plus its toast error face.
+                setIsLoggingOutFromSpaceSelect(true)
+                void handleAdminLogout().finally(() => setIsLoggingOutFromSpaceSelect(false))
               }}
             />
             <ProductSpaceSwitchDialog />
@@ -3920,6 +3928,7 @@ export default function App() {
             onAdminSendPhoneCode={onboarding.handleAdminSendPhoneCode}
             onAdminVerifyPhoneCode={onboarding.handleAdminVerifyPhoneCode}
             onAdminRelogin={onboarding.handleAdminRelogin}
+            onQuitApp={() => { void window.electronAPI.menuQuit() }}
             onSubmitLocalModel={onboarding.handleSubmitLocalModel}
             onStartOAuth={onboarding.handleStartOAuth}
             onFinish={onboarding.handleFinish}

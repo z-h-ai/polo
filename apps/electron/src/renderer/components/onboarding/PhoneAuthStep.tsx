@@ -174,6 +174,18 @@ export function PhoneAuthStep({
             )}
           </button>
 
+          {/* Explicit-consent hint, same contract as the password scene: the
+          button above is disabled (canSendPhoneAuthCode) while unchecked. */}
+          {!form.consented ? (
+            <p
+              data-testid="phone-auth-consent-required"
+              className="m-0 text-[13px] leading-[1.5] text-foreground-50"
+              role="note"
+            >
+              {t("onboarding.adminLogin.consentRequired")}
+            </p>
+          ) : null}
+
           {/* Same operational escape hatch as the password scene: a hung
           send/verify must not hard-lock the phone branch (busy L1). */}
           {isBusy && onCancel ? (
@@ -261,6 +273,18 @@ export function PhoneAuthStep({
             t("onboarding.adminLogin.continue")
           )}
         </button>
+
+        {/* Explicit-consent hint, same contract as the password scene
+        (canVerifyPhoneAuthCode keeps the submit gated on consent). */}
+        {!form.consented ? (
+          <p
+            data-testid="phone-auth-consent-required"
+            className="m-0 text-[13px] leading-[1.5] text-foreground-50"
+            role="note"
+          >
+            {t("onboarding.adminLogin.consentRequired")}
+          </p>
+        ) : null}
 
         <AdminLoginMethodSwitch
           target="password"
