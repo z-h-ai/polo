@@ -1595,7 +1595,12 @@ export class AdminClient {
   private projectContextPath(productSpaceId: string, suffix: string, projectId?: string): string {
     // POO-205 PC v2: the project (inside the organization space) owns the
     // asset scope; the admin route validates project ⊆ organization ⊕ membership.
-    const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
+    // Callers may pass a suffix that already carries its own query string
+    // (`/assets?view=active&limit=50`); joining with another '?' would plant
+    // a literal '?' INSIDE the previous value (limit=50?projectId=...) and
+    // fail the admin route's strict schema with a 400.
+    const joiner = suffix.includes('?') ? '&' : '?';
+    const query = projectId ? `${joiner}projectId=${encodeURIComponent(projectId)}` : '';
     return `/api/project-context/${encodeURIComponent(productSpaceId)}${suffix}${query}`;
   }
 

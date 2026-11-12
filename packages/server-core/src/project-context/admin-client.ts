@@ -100,17 +100,48 @@ async function withAdmin<T>(run: (client: AdminClient, accessToken: string) => P
   if (!adminUrl) {
     throw new ProjectContextAdminUnavailableError('pc_admin_unreachable', 'No admin server is configured')
   }
-  let accessToken: string | null = null
+  let session: Awaited<ReturnType<CredentialManager['getAdminTokens']>> = null
   try {
-    const tokens = await getCredentialManager().getAdminTokens()
-    accessToken = tokens?.accessToken ?? null
+    session = await getCredentialManager().getAdminTokens()
   } catch {
-    accessToken = null
+    session = null
   }
-  if (!accessToken) {
+  if (!session) {
     throw new ProjectContextAdminUnavailableError('pc_signed_out', 'No signed-in admin session is available')
   }
-  return run(new AdminClient(adminUrl, { requestTimeoutMs: PC_REQUEST_TIMEOUT_MS }), accessToken)
+  // The PC surface MUST ride the same 401 → refresh → retry contract as every
+  // other admin client: admin access tokens live 15 minutes, and a client
+  // without a tokenStore turned every routine lapse into a raw 401 that the
+  // caller can only report as "project file service unavailable". The stored
+  // account id anchors the refresh — a token that drifted to another account
+  // (workspace switch mid-call) is never reused or persisted.
+  const accountId = session.userId
+  const client = new AdminClient(adminUrl, {
+    requestTimeoutMs: PC_REQUEST_TIMEOUT_MS,
+    tokenStore: {
+      async getRefreshToken() {
+        const current = await getCredentialManager().getAdminTokens()
+        return current?.userId === accountId ? current.refreshToken : null
+      },
+      async onTokensRefreshed(refreshed) {
+        const current = await getCredentialManager().getAdminTokens()
+        if (!current || current.userId !== accountId) {
+          throw new Error('Admin session changed during project-context token refresh')
+        }
+        await getCredentialManager().setAdminTokens({
+          accessToken: refreshed.accessToken,
+          refreshToken: refreshed.refreshToken,
+          expiresAt: Date.now() + refreshed.expiresIn * 1000,
+          userId: current.userId,
+          username: current.username,
+          displayName: current.displayName,
+          role: current.role,
+          groupIds: current.groupIds,
+        })
+      },
+    },
+  })
+  return run(client, session.accessToken)
 }
 
 /** The live adapter used by RPC handlers and the send path. */

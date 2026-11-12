@@ -131,6 +131,12 @@ function mapAdminFailure(error: unknown): Error {
   }
   const code = projectContextErrorCodeOf(error)
   if (code) return pcError(code)
+  // A 401 that survived the client's refresh-and-retry pass means the admin
+  // session itself is gone — tell the member to sign in again instead of the
+  // misleading "check your network" service-unavailable copy.
+  if ((error as { status?: unknown })?.status === 401) {
+    return pcError('pc_signin_required')
+  }
   return pcError('pc_service_unavailable', error instanceof Error ? error.message : undefined)
 }
 
