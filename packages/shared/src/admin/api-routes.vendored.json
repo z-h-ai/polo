@@ -1,0 +1,2678 @@
+{
+  "schemaVersion": 1,
+  "routes": [
+    {
+      "path": "/api/admin/artifacts/governance/audit",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/artifacts/governance/events",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/artifacts/governance/versions/[versionId]",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/artifacts/governance/versions/[versionId]/approve",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/artifacts/governance/versions/[versionId]/block",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/artifacts/governance/versions/[versionId]/reject",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/artifacts/governance/versions/[versionId]/remediation",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/artifacts/governance/versions/[versionId]/remediation/clear",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/artifacts/governance/versions/[versionId]/unblock",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/artifacts/release-readiness-policy",
+      "methods": [
+        "GET",
+        "PATCH"
+      ]
+    },
+    {
+      "path": "/api/admin/audit-logs",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/billing/compensations",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/billing/quota-overrides",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/creator-circles/conversions",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/creator-circles/conversions/[legacyOrganizationId]",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/creator-circles/price-revisions",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/creator-circles/price-revisions/[revisionId]/review",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/creator-skills/expire",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/enterprises/[enterpriseId]/close-responsibilities",
+      "methods": [
+        "PATCH"
+      ]
+    },
+    {
+      "path": "/api/admin/enterprises/[enterpriseId]/state",
+      "methods": [
+        "PATCH"
+      ]
+    },
+    {
+      "path": "/api/admin/governance/organizations/[organizationId]/apps/[appId]/disable",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/governance/organizations/[organizationId]/apps/[appId]/releases/[releaseId]/disable",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/governance/organizations/[organizationId]/apps/[appId]/releases/[releaseId]/restore",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/governance/organizations/[organizationId]/apps/[appId]/restore",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/groups",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/groups/[groupId]",
+      "methods": [
+        "DELETE",
+        "GET",
+        "PATCH"
+      ]
+    },
+    {
+      "path": "/api/admin/groups/[groupId]/llm-connections",
+      "methods": [
+        "DELETE",
+        "GET",
+        "PUT"
+      ]
+    },
+    {
+      "path": "/api/admin/groups/[groupId]/members",
+      "methods": [
+        "DELETE",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/kb/provision",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/me",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/accounts/[accountId]/identity-recovery",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/accounts/[accountId]/installations",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/accounts/[accountId]/restriction",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/accounts/[accountId]/work-entitlements",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/accounts/search",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/artifact-versions/[versionId]/ordinary-violation",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/artifact-versions/[versionId]/restriction",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/artifact-versions/[versionId]/review",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/assets/[creatorId]/handoff",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/audits",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/circles/orders",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/circles/orders/[orderId]/refund",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/circles/price-policy",
+      "methods": [
+        "GET",
+        "POST",
+        "PUT"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/circles/price-revisions/[revisionId]",
+      "methods": [
+        "GET",
+        "POST",
+        "PUT"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/circles/settlements",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/circles/settlements/[batchId]/payment-receipt",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/closing-audit",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/closing-audit/accounts/[userId]/close",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/closing-audit/accounts/[userId]/readiness",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/closing-audit/circles/[circleId]/finalize",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/closing-audit/enterprises/[enterpriseId]/finalize-close",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/closing-audit/enterprises/[enterpriseId]/refund-batches/[itemId]",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/closing-audit/enterprises/[enterpriseId]/refund-batches/[itemId]/adjudication",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/closing-audit/enterprises/[enterpriseId]/refund-batches/[itemId]/adjudication-recovery",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/closing-audit/enterprises/[enterpriseId]/refund-plan",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/closing-responsibilities/[subjectType]/[subjectId]",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/compute/configuration",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/compute/configuration/activate",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/compute/configuration/check",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/compute/configuration/models",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/compute/products",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/compute/products/[productId]",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/compute/rates",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/compute/spaces",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/compute/spaces/[spaceId]",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/compute/spaces/[spaceId]/gifts",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/compute/spaces/[spaceId]/gifts/[batchId]/revoke",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/compute/spaces/[spaceId]/key-rotation",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/compute/spaces/[spaceId]/sync",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/compute/usage",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/compute/usage/[requestId]",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/compute/usage/[requestId]/absorption",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/compute/usage/[requestId]/correction",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/creators/[creatorId]/asset-portfolio",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/decisions/[decisionId]/appeal-resolution",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/emergency-accesses",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/emergency-accesses/[accessId]/content",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/emergency-accesses/[accessId]/mobile-confirmation",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/emergency-accesses/[accessId]/revoke",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/emergency-accesses/[accessId]/scopes/[scopeType]/[scopeId]",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/enterprises",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/enterprises/[enterpriseId]/finalize-closure",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/enterprises/[enterpriseId]/invoice-requests/[requestId]",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/enterprises/[enterpriseId]/invoice-requests/[requestId]/uploads",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/enterprises/[enterpriseId]/owner-recovery",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/enterprises/[enterpriseId]/restriction",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/events",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/events/[eventId]",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/events/[eventId]/claim",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/events/[eventId]/complete",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/events/[eventId]/decisions/[decisionId]/appeals/[appealId]/evidence/[evidenceId]",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/events/[eventId]/financial-resolution",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/events/[eventId]/portfolio-progress",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/events/[eventId]/runtime-diagnosis",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/events/[eventId]/temporary-quota",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/events/[eventId]/version-package",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/finance/billing-runs",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/finance/compensations",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/finance/disputes",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/finance/items",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/finance/reconciliation",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/financial-projection/[subjectType]/[subjectId]",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/health",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/invoices",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/invoices/[invoiceId]/files",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/issues",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/me",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/notifications/[notificationId]/retry",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/objects",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/objects/[objectType]/[stableId]/workflow",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/orders",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/orders/[orderId]",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/orders/[orderId]/recover",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/orders/[orderId]/refund-resolution",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/policies/[policyKey]",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/staff",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/staff/[staffId]/authorization",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/staff/[staffId]/recovery",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/staff/onboarding",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/support-configuration",
+      "methods": [
+        "GET",
+        "PUT"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/users/[id]/creator-qualification",
+      "methods": [
+        "GET",
+        "PATCH"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/works",
+      "methods": [
+        "GET",
+        "POST",
+        "PUT"
+      ]
+    },
+    {
+      "path": "/api/admin/operations/works/[versionId]/effects",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/usage/overview",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/users",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/users/[id]",
+      "methods": [
+        "DELETE",
+        "GET",
+        "PATCH"
+      ]
+    },
+    {
+      "path": "/api/admin/users/[id]/account",
+      "methods": [
+        "GET",
+        "PATCH"
+      ]
+    },
+    {
+      "path": "/api/admin/users/[id]/billing-quota",
+      "methods": [
+        "PUT"
+      ]
+    },
+    {
+      "path": "/api/admin/users/[id]/creator-qualification",
+      "methods": [
+        "GET",
+        "PATCH"
+      ]
+    },
+    {
+      "path": "/api/admin/users/[id]/llm-connections",
+      "methods": [
+        "DELETE",
+        "GET",
+        "PUT"
+      ]
+    },
+    {
+      "path": "/api/admin/users/[id]/password",
+      "methods": [
+        "PUT"
+      ]
+    },
+    {
+      "path": "/api/admin/users/[id]/revoke-session/[jti]",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/users/[id]/revoke-sessions",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/admin/users/[id]/sessions",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/admin/users/[id]/usage",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/artifact-policies/skill",
+      "methods": [
+        "GET",
+        "PATCH"
+      ]
+    },
+    {
+      "path": "/api/artifact-policies/web_app",
+      "methods": [
+        "GET",
+        "PATCH"
+      ]
+    },
+    {
+      "path": "/api/artifacts/[artifactId]",
+      "methods": [
+        "DELETE",
+        "GET",
+        "PATCH"
+      ]
+    },
+    {
+      "path": "/api/artifacts/[artifactId]/archive",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/artifacts/[artifactId]/lifecycle",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/artifacts/[artifactId]/restore",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/artifacts/[artifactId]/versions",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/artifacts/[artifactId]/versions/[version]",
+      "methods": [
+        "DELETE",
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/artifacts/[artifactId]/versions/[version]/download",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/artifacts/[artifactId]/versions/[version]/download/file",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/artifacts/[artifactId]/versions/[version]/impact",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/artifacts/[artifactId]/versions/[version]/publish",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/artifacts/[artifactId]/versions/[version]/revoke",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/artifacts/[artifactId]/versions/[version]/rollback",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/artifacts/[artifactId]/versions/[version]/submit-check",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/artifacts/[artifactId]/versions/[version]/upload",
+      "methods": [
+        "PUT"
+      ]
+    },
+    {
+      "path": "/api/artifacts/[artifactId]/versions/[version]/upload-complete",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/artifacts/[artifactId]/versions/[version]/uploads",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/artifacts/[artifactId]/versions/[version]/validate",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/artifacts/[artifactId]/versions/[version]/validation",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/auth/config",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/auth/email/request",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/auth/email/verify",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/auth/login",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/auth/logout",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/auth/password",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/auth/payment-handoff/issue",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/auth/payment-handoff/redeem",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/auth/phone/challenge/config",
+      "methods": [
+        "GET",
+        "OPTIONS"
+      ]
+    },
+    {
+      "path": "/api/auth/phone/reauth",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/auth/phone/reauth/send-code",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/auth/phone/send-code",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/auth/phone/verify",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/auth/refresh",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/auth/validate",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/billing/runs",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/billing/runs/[runId]",
+      "methods": [
+        "PATCH"
+      ]
+    },
+    {
+      "path": "/api/billing/runs/[runId]/requests",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/billing/runs/[runId]/requests/[requestId]",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/billing/usage",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/browser-policy",
+      "methods": [
+        "GET",
+        "OPTIONS"
+      ]
+    },
+    {
+      "path": "/api/capabilities",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/circle-checkout/[orderId]",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/circle-checkout/[orderId]/payment-status",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/circle-checkout/[orderId]/recover-qr",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/circle-checkout/[orderId]/submit",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/circle-checkout/provider/[channel]/[orderId]",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/circle-join/[token]",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/client/enterprises",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/client/migrations/poo-205/mapping",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/client/organizations/[organizationId]/colleagues",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/client/organizations/[organizationId]/projects",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/client/organizations/[organizationId]/projects/[projectId]",
+      "methods": [
+        "GET",
+        "PATCH"
+      ]
+    },
+    {
+      "path": "/api/client/organizations/[organizationId]/projects/[projectId]/members",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/client/organizations/[organizationId]/projects/[projectId]/members/[accountId]",
+      "methods": [
+        "DELETE",
+        "PATCH"
+      ]
+    },
+    {
+      "path": "/api/client/product-spaces/[productSpaceId]/collaboration-roster",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/client/product-spaces/[productSpaceId]/colleague-invitations",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/client/product-spaces/[productSpaceId]/colleague-options",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/client/product-spaces/[productSpaceId]/invitations",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/client/product-spaces/[productSpaceId]/members",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/client/product-spaces/[productSpaceId]/my-apps",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/client/product-spaces/[productSpaceId]/my-apps/[appId]",
+      "methods": [
+        "DELETE"
+      ]
+    },
+    {
+      "path": "/api/client/product-spaces/[productSpaceId]/my-apps/[appId]/publish",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/client/product-spaces/[productSpaceId]/my-apps/[appId]/withdraw",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/creator-application",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/creator-circles",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/creator-circles/[circleId]",
+      "methods": [
+        "GET",
+        "PATCH"
+      ]
+    },
+    {
+      "path": "/api/creator-circles/[circleId]/applications/[applicationId]",
+      "methods": [
+        "PATCH"
+      ]
+    },
+    {
+      "path": "/api/creator-circles/[circleId]/distributions",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/creator-circles/[circleId]/invitations",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/creator-circles/[circleId]/members",
+      "methods": [
+        "GET",
+        "PUT"
+      ]
+    },
+    {
+      "path": "/api/creator-circles/distribution-plan",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/creator-workbench",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/creator-workbench/feedback",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/creator-workbench/feedback/[feedbackId]",
+      "methods": [
+        "GET",
+        "PATCH"
+      ]
+    },
+    {
+      "path": "/api/creator-workbench/feedback/[feedbackId]/materials/[materialId]",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/creator-workbench/operations",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/creator-workbench/payee-profile",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/creator-workbench/support",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/creator-workbench/support/qr",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/credit-orders/[orderId]",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/credit-orders/[orderId]/late-payment-resolution",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/credit-orders/[orderId]/query",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/credit-orders/[orderId]/refund",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/download/desktop",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/enterprise-invitations/[token]",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/enterprise-invitations/[token]/accept",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/enterprise-invitations/[token]/applications",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/enterprise-invitations/[token]/status",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/enterprises",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/apps/[appId]/distribution",
+      "methods": [
+        "PUT"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/apps/distribution",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/artifacts",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/artifacts/[instanceId]",
+      "methods": [
+        "DELETE",
+        "GET",
+        "PATCH"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/artifacts/[instanceId]/display",
+      "methods": [
+        "GET",
+        "PATCH"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/artifacts/[instanceId]/distribution",
+      "methods": [
+        "GET",
+        "PUT"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/artifacts/[instanceId]/distribution/preview",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/artifacts/[instanceId]/enabled",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/artifacts/[instanceId]/history",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/artifacts/[instanceId]/hosting",
+      "methods": [
+        "GET",
+        "PATCH",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/artifacts/[instanceId]/versions",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/artifacts/[instanceId]/versions/[versionId]/adopt",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/artifacts/[instanceId]/versions/[versionId]/rollback",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/artifacts/[instanceId]/versions/import",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/artifacts/[instanceId]/versions/import/[importId]/confirm",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/artifacts/import",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/artifacts/import/[importId]",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/artifacts/import/[importId]/confirm",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/audit",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/billing",
+      "methods": [
+        "GET",
+        "PUT"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/billing/consumption-records",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/billing/usage-records",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/closing-receipt",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/credit-orders",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/credit-orders/[orderId]",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/credit-orders/[orderId]/close-unpaid",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/credit-orders/[orderId]/query",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/credit-orders/[orderId]/refund",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/credit-orders/[orderId]/refund-quote",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/credit-products",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/governance-read/appeals",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/governance-read/billing",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/governance-read/necessary-export",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/groups",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/groups/[groupId]",
+      "methods": [
+        "DELETE",
+        "PATCH"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/groups/[groupId]/members",
+      "methods": [
+        "PUT"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/groups/[groupId]/members/preview",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/invitations",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/invitations/[invitationId]",
+      "methods": [
+        "DELETE"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/invitations/[invitationId]/applications/[applicationId]",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/invitations/[invitationId]/regenerate",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/invoice-requests",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/invoice-requests/[requestId]",
+      "methods": [
+        "DELETE",
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/invoice-requests/[requestId]/file",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/lifecycle",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/member-options",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/members",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/members/[userId]",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/members/[userId]/groups",
+      "methods": [
+        "GET",
+        "PUT"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/members/[userId]/groups/preview",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/overview",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/owner-transfer",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/owner-transfer/preview",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/recovery",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/settings",
+      "methods": [
+        "GET",
+        "PATCH"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/shared-invitations",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/skills/[artifactId]/distribution",
+      "methods": [
+        "PUT"
+      ]
+    },
+    {
+      "path": "/api/enterprises/[enterpriseId]/state",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/governance/recovery/current",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/governance/recovery/link",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/governance/recovery/request-code",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/governance/recovery/verify",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/health",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/health/runtime-identity",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/installed-artifacts/status",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/circle-authority/close-evidence",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/circle-authority/payment-evidence",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/circle-authority/retention-dispositions",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/circle-billing/checkout-outcome",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/circle-billing/payee-profile/[userId]/verify",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/circle-billing/revenue-correction",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/circle-billing/settlement-batch",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/circle-entitlement-events",
+      "methods": [
+        "GET",
+        "PATCH"
+      ]
+    },
+    {
+      "path": "/api/internal/circle-memberships/expire",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/circle-memberships/payment-events",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/creator-circles/[circleId]/close-checks",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/domain-authority/billing",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/domain-authority/data",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/domain-authority/legal",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/domain-authority/ownership",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/domain-authority/refunds",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/domain-authority/runs",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/enterprise-artifacts/delivery-packages",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/enterprise-artifacts/governance",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/enterprise-artifacts/import-inspections",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/enterprise-artifacts/inspection",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/enterprise-authority/billing",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/enterprise-authority/data",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/enterprise-authority/legal",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/enterprise-authority/ownership",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/enterprise-authority/refunds",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/enterprise-authority/runs",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/governance/affected-population-projections",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/governance/command-receipts",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/governance/major-security-incidents",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/governance/major-security-incidents/[incidentId]/close",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/governance/major-security-incidents/[incidentId]/revoke",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/governance/portfolio-effects/[effectId]/ack",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/runtime-dispatcher/governance/capabilities",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/runtime-dispatcher/governance/executions/cancel-start",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/runtime-dispatcher/governance/executions/reserve-start",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/runtime-dispatcher/governance/executions/start",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/runtime-dispatcher/governance/executions/start-outcome",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/internal/runtime-dispatcher/governance/executions/terminate",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/join/[token]/accept",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/join/[token]/preview",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/kb/credential",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/llm-connections",
+      "methods": [
+        "GET",
+        "OPTIONS"
+      ]
+    },
+    {
+      "path": "/api/me/admin-entries",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/me/circle-feedback",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/me/circle-feedback/[feedbackId]/materials/[materialId]",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/me/circle-memberships",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/me/circle-memberships/[membershipId]",
+      "methods": [
+        "GET",
+        "PATCH",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/me/circle-payment-orders/[orderId]",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/me/circles",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/me/devices/[deviceId]/artifacts/[artifactId]/state",
+      "methods": [
+        "PUT"
+      ]
+    },
+    {
+      "path": "/api/me/devices/[deviceId]/installations",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/me/enterprise-context",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/me/enterprises",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/me/installation-admissions",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/me/organizations",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/me/product-spaces",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/me/product-spaces/[productSpaceId]/activations",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/organization-console/me",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/organizations",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/organizations/[organizationId]",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/organizations/[organizationId]/admin/app-publishing/tasks/[taskId]",
+      "methods": [
+        "DELETE"
+      ]
+    },
+    {
+      "path": "/api/organizations/[organizationId]/admin/app-publishing/tasks/[taskId]/analyze",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/organizations/[organizationId]/admin/app-publishing/upload-intent",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/organizations/[organizationId]/admin/app-publishing/uploads/[taskId]",
+      "methods": [
+        "PUT"
+      ]
+    },
+    {
+      "path": "/api/organizations/[organizationId]/admin/apps",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/organizations/[organizationId]/admin/apps/[appId]",
+      "methods": [
+        "PATCH"
+      ]
+    },
+    {
+      "path": "/api/organizations/[organizationId]/admin/apps/[appId]/disable",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/organizations/[organizationId]/admin/apps/[appId]/enable",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/organizations/[organizationId]/admin/apps/[appId]/releases",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/organizations/[organizationId]/admin/apps/[appId]/releases/[releaseId]/disable",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/organizations/[organizationId]/admin/apps/[appId]/releases/[releaseId]/enable",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/organizations/[organizationId]/admin/apps/[appId]/releases/[releaseId]/publish",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/organizations/[organizationId]/admin/apps/[appId]/releases/[releaseId]/upload",
+      "methods": [
+        "PUT"
+      ]
+    },
+    {
+      "path": "/api/organizations/[organizationId]/admin/apps/[appId]/releases/[releaseId]/upload-complete",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/organizations/[organizationId]/admin/apps/order",
+      "methods": [
+        "PUT"
+      ]
+    },
+    {
+      "path": "/api/organizations/[organizationId]/apps",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/organizations/[organizationId]/apps/[appId]/launch",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/organizations/[organizationId]/apps/[appId]/releases/[releaseId]/download",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/organizations/[organizationId]/apps/[appId]/releases/[releaseId]/download/file",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/organizations/[organizationId]/artifacts",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/organizations/[organizationId]/invitations",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/organizations/[organizationId]/invitations/[invitationId]",
+      "methods": [
+        "DELETE"
+      ]
+    },
+    {
+      "path": "/api/organizations/[organizationId]/join-links",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/organizations/[organizationId]/join-links/[joinLinkId]",
+      "methods": [
+        "DELETE"
+      ]
+    },
+    {
+      "path": "/api/organizations/[organizationId]/members",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/organizations/[organizationId]/members/[memberId]",
+      "methods": [
+        "DELETE",
+        "PATCH"
+      ]
+    },
+    {
+      "path": "/api/payments/[channel]/callback",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/payments/fake/settle",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/personal-entitlements/artifacts/[artifactId]/versions/[versionId]/download",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/product-spaces/[productSpaceId]/apps/install",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/product-spaces/[productSpaceId]/artifacts/[artifactInstanceId]/versions/[versionId]/download",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/product-spaces/[productSpaceId]/artifacts/[artifactInstanceId]/visibility",
+      "methods": [
+        "PATCH"
+      ]
+    },
+    {
+      "path": "/api/product-spaces/[productSpaceId]/billing",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/product-spaces/[productSpaceId]/billing/consumption-records",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/product-spaces/[productSpaceId]/billing/credit-consumption",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/product-spaces/[productSpaceId]/billing/self-availability",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/product-spaces/[productSpaceId]/catalog",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/product-spaces/[productSpaceId]/catalog/[catalogEntryId]/resolve-launch",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/product-spaces/[productSpaceId]/credit-orders",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/product-spaces/[productSpaceId]/credit-products",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/product-spaces/[productSpaceId]/emergency-authorizations",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/product-spaces/[productSpaceId]/emergency-authorizations/[authorizationId]/revoke",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/product-spaces/[productSpaceId]/enterprise-artifacts/[instanceId]/display",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/product-spaces/[productSpaceId]/runtime",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/product-spaces/[productSpaceId]/runtime/[executionKey]/authorize",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/product-spaces/[productSpaceId]/skills/[artifactInstanceId]/enablement",
+      "methods": [
+        "PUT"
+      ]
+    },
+    {
+      "path": "/api/product-spaces/[productSpaceId]/skills/turns",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/product-spaces/[productSpaceId]/skills/turns/[receiptId]/authorize",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/product-spaces/[productSpaceId]/skills/turns/[receiptId]/finish",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/project-context/[productSpaceId]/assets",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/project-context/[productSpaceId]/assets/[assetId]",
+      "methods": [
+        "DELETE",
+        "GET",
+        "PATCH"
+      ]
+    },
+    {
+      "path": "/api/project-context/[productSpaceId]/assets/[assetId]/confirm",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/project-context/[productSpaceId]/assets/[assetId]/download",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/project-context/[productSpaceId]/assets/[assetId]/pin",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/project-context/[productSpaceId]/assets/[assetId]/preview",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/project-context/[productSpaceId]/assets/[assetId]/read",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/project-context/[productSpaceId]/assets/[assetId]/restore",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/project-context/[productSpaceId]/assets/[assetId]/uploads",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/project-context/[productSpaceId]/assets/[assetId]/uploads/[uploadId]/complete",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/project-context/[productSpaceId]/capabilities",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/project-context/[productSpaceId]/rebuild",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/project-context/[productSpaceId]/search",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/project-context/[productSpaceId]/summary",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/public/apps/[slug]/ai/query",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/public/apps/[slug]/session",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/quota/check",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/quota/status",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/quota/usage",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/ready",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/runtime/dispatcher/acknowledgements",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/runtime/dispatcher/app-release-stop-receipts",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/support/configuration",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/version",
+      "methods": [
+        "GET"
+      ]
+    }
+  ]
+}
