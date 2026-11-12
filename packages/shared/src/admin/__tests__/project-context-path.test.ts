@@ -123,4 +123,31 @@ describe('AdminClient projectContextPath query joining', () => {
     expect(url.searchParams.get('projectId')).toBe('prj_abc');
     expectSingleQueryMark(fetchUrls[0]!);
   });
+
+  // 2026-11-12 production fix guard: the pin toggle used to POST `…/pinned`
+  // while the admin App Router route lives at `…/pin` — every pin/unpin 404'd
+  // and the Pin tab stayed empty. Same drift for `…/confirmed` vs `…/confirm`.
+  // These two pin the client paths to the admin route directories verbatim.
+  it('posts the pin toggle to /pin (the admin route dir), not /pinned', async () => {
+    mockOkJson({ asset: assetDto });
+    const client = new AdminClient('https://admin.example.com');
+    await client.setProjectContextPinned('token', 'space-1', 'prj_abc', 'asset-1', { pinned: true });
+    const url = new URL(fetchUrls[0]!);
+    expect(url.pathname).toBe('/api/project-context/space-1/assets/asset-1/pin');
+    expect(url.searchParams.get('projectId')).toBe('prj_abc');
+    expectSingleQueryMark(fetchUrls[0]!);
+  });
+
+  it('posts the confirmation write to /confirm (the admin route dir), not /confirmed', async () => {
+    mockOkJson({ asset: assetDto });
+    const client = new AdminClient('https://admin.example.com');
+    await client.setProjectContextConfirmed('token', 'space-1', 'prj_abc', 'asset-1', {
+      expectedVersion: 1,
+      confirmed: true,
+    });
+    const url = new URL(fetchUrls[0]!);
+    expect(url.pathname).toBe('/api/project-context/space-1/assets/asset-1/confirm');
+    expect(url.searchParams.get('projectId')).toBe('prj_abc');
+    expectSingleQueryMark(fetchUrls[0]!);
+  });
 });

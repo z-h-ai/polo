@@ -1738,7 +1738,10 @@ export class AdminClient {
     return this.readSuccessResponse(response, PcMutationResponseSchema);
   }
 
-  /** POST /api/project-context/{id}/assets/{assetId}/confirmed — version-bound confirmation write. */
+  /** POST /api/project-context/{id}/assets/{assetId}/confirm — version-bound confirmation write.
+   * 2026-11-12 production fix: the client used to POST `/confirmed` while the
+   * admin App Router route only exists at `…/confirm` (dir `confirm/route.ts`),
+   * so every confirmation toggle 404'd. The admin route path is the authority. */
   async setProjectContextConfirmed(
     accessToken: string,
     productSpaceId: string,
@@ -1747,13 +1750,17 @@ export class AdminClient {
     input: PcSetConfirmedInput,
   ): Promise<PcMutationResponse> {
     const response = await this.request<unknown>(
-      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/confirmed`, projectId),
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/confirm`, projectId),
       { method: 'POST', accessToken, body: PcSetConfirmedInputSchema.parse(input) },
     );
     return this.readSuccessResponse(response, PcMutationResponseSchema);
   }
 
-  /** POST /api/project-context/{id}/assets/{assetId}/pinned — pin toggle. */
+  /** POST /api/project-context/{id}/assets/{assetId}/pin — pin toggle.
+   * 2026-11-12 production fix: the client used to POST `/pinned` while the
+   * admin App Router route only exists at `…/pin` (dir `pin/route.ts`), so
+   * every pin/unpin from the project file surface 404'd and the Pin tab
+   * stayed permanently empty. The admin route path is the authority. */
   async setProjectContextPinned(
     accessToken: string,
     productSpaceId: string,
@@ -1762,7 +1769,7 @@ export class AdminClient {
     input: PcSetPinnedInput,
   ): Promise<PcMutationResponse> {
     const response = await this.request<unknown>(
-      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/pinned`, projectId),
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/pin`, projectId),
       { method: 'POST', accessToken, body: PcSetPinnedInputSchema.parse(input) },
     );
     return this.readSuccessResponse(response, PcMutationResponseSchema);
