@@ -12,6 +12,7 @@ import { AlertCircle } from 'lucide-react'
 import { EditPopover, EditButton, getEditConfig } from '@/components/ui/EditPopover'
 import { SourceAvatar } from '@/components/ui/source-avatar'
 import { SourceMenu } from '@/components/app-shell/SourceMenu'
+import { useConfirmDialog } from '@/components/ui/confirm-dialog'
 import { cn } from '@/lib/utils'
 import { routes, navigate } from '@/lib/navigate'
 import { useNavigation } from '@/contexts/NavigationContext'
@@ -334,9 +335,22 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
     }
   }, [source])
 
-  // Handle deleting source (navigates to source list, preserving current filter)
+  // Handle deleting source (navigates to source list, preserving current filter).
+  // Danger guard: deleting breaks every connection built on this source, so the
+  // click asks first — same ConfirmDialog contract as SkillInfoPage's
+  // force-delete (cancel/ESC never writes; a failed delete keeps the dialog
+  // open for retry via the page-level toast).
+  const { requestConfirm: requestDeleteConfirm, confirmElement: deleteConfirmElement } = useConfirmDialog()
+
   const handleDelete = useCallback(async () => {
     if (!source) return
+    const confirmed = await requestDeleteConfirm({
+      testId: 'source-delete-confirm',
+      title: t('sourceInfo.deleteConfirmTitle', { name: source.config.name }),
+      description: t('sourceInfo.deleteConfirmDescription'),
+      confirmLabel: t('common.delete'),
+    })
+    if (!confirmed) return
     try {
       await window.electronAPI.deleteSource(workspaceId, sourceSlug)
       toast.success(t('sourceInfo.deletedSource', { name: source.config.name }))
@@ -347,7 +361,7 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
         description: err instanceof Error ? err.message : undefined,
       })
     }
-  }, [source, workspaceId, sourceSlug, onDelete, navigateToSource])
+  }, [source, workspaceId, sourceSlug, onDelete, navigateToSource, requestDeleteConfirm, t])
 
   // Handle opening in new window
   const handleOpenInNewWindow = useCallback(() => {
@@ -527,6 +541,8 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
           )}
         </Info_Page.Content>
       )}
+
+      {deleteConfirmElement}
     </Info_Page>
   )
 }

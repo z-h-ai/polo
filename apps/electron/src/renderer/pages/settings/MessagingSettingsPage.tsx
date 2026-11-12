@@ -53,6 +53,7 @@ import { TelegramConnectDialog } from '@/components/messaging/TelegramConnectDia
 import { LarkConnectDialog } from '@/components/messaging/LarkConnectDialog'
 import { TelegramSupergroupPairingDialog } from '@/components/messaging/TelegramSupergroupPairingDialog'
 import { WhatsAppConnectDialog } from '@/components/messaging/WhatsAppConnectDialog'
+import { useConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
   BindingAllowListPopover,
   TelegramAccessSection,
@@ -312,13 +313,25 @@ function PlatformRow({ platform, workspaceId }: { platform: Platform; workspaceI
     }
   }
 
+  // Danger guard: "forget" wipes the saved sign-in state (WhatsApp: the paired
+  // session itself), so this leaf carries its own label AND a confirmation —
+  // the plain disconnect above stays one-click (reversible, keeps credentials).
+  const { requestConfirm: requestForgetConfirm, confirmElement: forgetConfirmElement } = useConfirmDialog()
+
   const handleForget = async () => {
+    const confirmed = await requestForgetConfirm({
+      testId: 'messaging-forget-confirm',
+      title: t('settings.messaging.forgetConfirmTitle'),
+      description: t('settings.messaging.forgetConfirmDescription', {
+        platform: t(PLATFORM_LABEL_KEYS[platform]),
+      }),
+      confirmLabel: t('settings.messaging.forgetAction'),
+    })
+    if (!confirmed) return
     try {
       await window.electronAPI.forgetMessagingPlatform(platform)
       toast.success(
-        t(`settings.messaging.${platform}.disconnected`, {
-          defaultValue: 'Disconnected',
-        }),
+        t('settings.messaging.forgetDone', { platform: t(PLATFORM_LABEL_KEYS[platform]) }),
       )
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('common.error'))
@@ -389,9 +402,9 @@ function PlatformRow({ platform, workspaceId }: { platform: Platform; workspaceI
                       <span>{t('common.disable')}</span>
                     </StyledDropdownMenuItem>
                     <StyledDropdownMenuSeparator />
-                    <StyledDropdownMenuItem onClick={handleForget} variant="destructive">
+                    <StyledDropdownMenuItem onClick={() => runAfterMenuClose(handleForget)} variant="destructive">
                       <Trash2 className="h-3.5 w-3.5" />
-                      <span>{t('common.disconnect')}</span>
+                      <span>{t('settings.messaging.forgetAction')}</span>
                     </StyledDropdownMenuItem>
                   </>
                 )}
@@ -473,6 +486,7 @@ function PlatformRow({ platform, workspaceId }: { platform: Platform; workspaceI
       {platform === 'lark' && (
         <LarkConnectDialog open={connectOpen} onOpenChange={setConnectOpen} reconfigure={reconfigure} />
       )}
+      {forgetConfirmElement}
     </>
   )
 }

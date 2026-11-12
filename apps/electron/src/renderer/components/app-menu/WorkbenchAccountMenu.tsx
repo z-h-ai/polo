@@ -63,6 +63,13 @@ export interface WorkbenchAccountMenuProps {
    */
   canOpenEnterpriseWorkflows?: boolean
   onOpenEnterpriseWorkflow?: (workflow: 'members' | 'publishing') => void
+  /**
+   * Danger guard: intercepts the logout leaf so the host can confirm first.
+   * The dialog must live OUTSIDE the dropdown content — Radix unmounts this
+   * menu on every close, so a confirm rendered inside would die mid-ask.
+   * When absent the menu falls back to the direct logout (old behavior).
+   */
+  onLogoutRequest?: () => void
 }
 
 const roleHandlers: Record<string, () => void> = {
@@ -204,7 +211,7 @@ function renderDebugSubmenu(t: (key: string) => string): React.ReactNode {
   )
 }
 
-export function WorkbenchAccountMenu({ onNewChat, onNewWindow, canOpenPayment, onOpenPayment, canOpenEnterpriseWorkflows, onOpenEnterpriseWorkflow }: WorkbenchAccountMenuProps) {
+export function WorkbenchAccountMenu({ onNewChat, onNewWindow, canOpenPayment, onOpenPayment, canOpenEnterpriseWorkflows, onOpenEnterpriseWorkflow, onLogoutRequest }: WorkbenchAccountMenuProps) {
   const { t } = useTranslation()
   const appShell = useOptionalAppShellContext()
   const theme = useOptionalTheme()
@@ -344,7 +351,16 @@ export function WorkbenchAccountMenu({ onNewChat, onNewWindow, canOpenPayment, o
       {user && appShell?.onAdminLogout && (
         <>
           <StyledDropdownMenuSeparator />
-          <StyledDropdownMenuItem onClick={() => { void appShell.onAdminLogout?.() }}>
+          <StyledDropdownMenuItem onClick={() => {
+            // Danger guard: revoke + logout clears ALL local account state and
+            // stops running executions, so the click asks first (the confirm
+            // itself is owned by the host via onLogoutRequest — see above).
+            if (onLogoutRequest) {
+              onLogoutRequest()
+              return
+            }
+            void appShell.onAdminLogout?.()
+          }}>
             <Icons.LogOut className="h-3.5 w-3.5" />
             {t("topbar.account.logout")}
           </StyledDropdownMenuItem>
