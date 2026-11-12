@@ -3220,6 +3220,7 @@
   "toolbar.closeWindowEntirely": "Zamknij okno całkowicie",
   "toolbar.escapeToInterrupt": "Naciśnij <kbd>Esc</kbd> ponownie, aby przerwać",
   "toolbar.hideWindow": "Ukryj okno",
+  "toolbar.pressEscToInterrupt": "Naciśnij <kbd>Esc</kbd>, aby przerwać",
   "toolbar.windowOptions": "Opcje okna",
   "topbar.account.creatorCenter": "Centrum twórcy",
   "topbar.account.enterpriseAdmin": "Panel administracyjny firmy",

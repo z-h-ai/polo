@@ -3206,6 +3206,7 @@
   "toolbar.closeWindowEntirely": "Close window entirely",
   "toolbar.escapeToInterrupt": "Press <kbd>Esc</kbd> again to interrupt",
   "toolbar.hideWindow": "Hide window",
+  "toolbar.pressEscToInterrupt": "Press <kbd>Esc</kbd> to interrupt",
   "toolbar.windowOptions": "Window options",
   "topbar.account.creatorCenter": "Creator center",
   "topbar.account.enterpriseAdmin": "Enterprise admin console",

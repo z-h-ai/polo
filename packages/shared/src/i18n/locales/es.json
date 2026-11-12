@@ -3206,6 +3206,7 @@
   "toolbar.closeWindowEntirely": "Cerrar la ventana por completo",
   "toolbar.escapeToInterrupt": "Presiona <kbd>Esc</kbd> de nuevo para interrumpir",
   "toolbar.hideWindow": "Ocultar ventana",
+  "toolbar.pressEscToInterrupt": "Pulsa <kbd>Esc</kbd> para interrumpir",
   "toolbar.windowOptions": "Opciones de ventana",
   "topbar.account.creatorCenter": "Centro de creadores",
   "topbar.account.enterpriseAdmin": "Consola de administración empresarial",

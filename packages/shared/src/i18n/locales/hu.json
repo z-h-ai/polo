@@ -3206,6 +3206,7 @@
   "toolbar.closeWindowEntirely": "Ablak teljes bezárása",
   "toolbar.escapeToInterrupt": "Nyomd meg az <kbd>Esc</kbd> gombot ismét a megszakításhoz",
   "toolbar.hideWindow": "Ablak elrejtése",
+  "toolbar.pressEscToInterrupt": "A megszakításhoz nyomd meg az <kbd>Esc</kbd> billentyűt",
   "toolbar.windowOptions": "Ablakbeállítások",
   "topbar.account.creatorCenter": "Alkotói központ",
   "topbar.account.enterpriseAdmin": "Vállalati admin konzol",

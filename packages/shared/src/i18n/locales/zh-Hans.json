@@ -3206,6 +3206,7 @@
   "toolbar.closeWindowEntirely": "彻底关闭窗口",
   "toolbar.escapeToInterrupt": "再次按 <kbd>Esc</kbd> 以中断",
   "toolbar.hideWindow": "隐藏窗口",
+  "toolbar.pressEscToInterrupt": "按 <kbd>Esc</kbd> 可随时中断",
   "toolbar.windowOptions": "窗口选项",
   "topbar.account.creatorCenter": "创作者中心",
   "topbar.account.enterpriseAdmin": "企业管理后台",

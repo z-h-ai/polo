@@ -28,14 +28,23 @@ import type { BrowserInstanceInfo } from '../../../../shared/types'
 interface ToolbarStatusSlotProps {
   /** Whether the escape interrupt overlay should be visible (highest priority) */
   showEscapeOverlay: boolean
+  /**
+   * Low-priority persistent hint shown while the agent is processing and
+   * nothing else occupies the slot: makes the otherwise hidden double-Esc
+   * interrupt discoverable before the first Esc press. pointer-events-none —
+   * the toolbar controls underneath stay operable.
+   */
+  showEscHint?: boolean
   /** Session ID to find the bound browser instance */
   sessionId?: string
 }
 
 export function ToolbarStatusSlot({
   showEscapeOverlay,
+  showEscHint = false,
   sessionId,
 }: ToolbarStatusSlotProps) {
+  const { t } = useTranslation()
   // Filter to the active workspace so a session here doesn't surface a
   // browser-status banner for an agent running in a different workspace.
   // Accept both the local workspace id (manual tabs) and the remote-mirror
@@ -62,8 +71,9 @@ export function ToolbarStatusSlot({
     return visibleCandidates.at(-1) ?? null
   }, [browserInstances, sessionId])
 
-  // Priority resolution: escape interrupt > browser status
+  // Priority resolution: escape interrupt > browser status > esc hint
   const showBrowser = !showEscapeOverlay && browserInstance !== null
+  const showHint = showEscHint && !showEscapeOverlay && !showBrowser
 
   const handleBrowserClick = React.useCallback((instanceId: string) => {
     window.electronAPI?.browserPane?.focus?.(instanceId)
@@ -94,6 +104,29 @@ export function ToolbarStatusSlot({
           <span className="text-sm font-medium flex items-center gap-1.5">
             <Trans
               i18nKey="toolbar.escapeToInterrupt"
+              components={{ kbd: <Kbd className="text-inherit bg-current/10" /> }}
+            />
+          </span>
+        </motion.div>
+      )}
+
+      {showHint && (
+        <motion.div
+          key="esc-hint"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          // Late fade-in: this is ambient guidance, not an alert
+          transition={{ duration: 0.3, delay: 1 }}
+          className={cn(
+            "absolute inset-0 z-10",
+            "flex items-center justify-center",
+            "pointer-events-none",
+          )}
+        >
+          <span className="flex items-center gap-1.5 text-xs text-muted-foreground/70">
+            <Trans
+              i18nKey="toolbar.pressEscToInterrupt"
               components={{ kbd: <Kbd className="text-inherit bg-current/10" /> }}
             />
           </span>

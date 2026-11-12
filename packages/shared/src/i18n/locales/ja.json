@@ -3206,6 +3206,7 @@
   "toolbar.closeWindowEntirely": "ウィンドウを完全に閉じる",
   "toolbar.escapeToInterrupt": "<kbd>Esc</kbd>を再度押して中断",
   "toolbar.hideWindow": "ウィンドウを隠す",
+  "toolbar.pressEscToInterrupt": "<kbd>Esc</kbd> でいつでも中断できます",
   "toolbar.windowOptions": "ウィンドウ操作",
   "topbar.account.creatorCenter": "クリエイターセンター",
   "topbar.account.enterpriseAdmin": "企業管理コンソール",

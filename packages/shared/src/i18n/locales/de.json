@@ -3206,6 +3206,7 @@
   "toolbar.closeWindowEntirely": "Fenster vollständig schließen",
   "toolbar.escapeToInterrupt": "Drücken Sie <kbd>Esc</kbd> erneut, um zu unterbrechen",
   "toolbar.hideWindow": "Fenster ausblenden",
+  "toolbar.pressEscToInterrupt": "Drücke <kbd>Esc</kbd>, um zu unterbrechen",
   "toolbar.windowOptions": "Fensteroptionen",
   "topbar.account.creatorCenter": "Creator-Center",
   "topbar.account.enterpriseAdmin": "Unternehmens-Adminbereich",
