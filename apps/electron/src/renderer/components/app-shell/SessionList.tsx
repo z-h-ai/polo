@@ -6,7 +6,7 @@ import { getDateLocale } from "@polo-ai/shared/i18n"
 import { useAction } from "@/actions"
 import { Inbox, Archive } from "lucide-react"
 
-import { getSessionStatus } from "@/utils/session"
+import { getSessionStatus, getSessionTitle } from "@/utils/session"
 import * as storage from "@/lib/local-storage"
 import { KEYS } from "@/lib/local-storage"
 import type { LabelConfig } from "@polo-ai/shared/labels"
@@ -20,8 +20,9 @@ import { SessionSearchHeader } from "./SessionSearchHeader"
 import { SessionItem } from "./SessionItem"
 import { SessionListProvider, type SessionListContextValue } from "@/context/SessionListContext"
 import { useSessionSelection, useSessionSelectionStore } from "@/hooks/useSession"
-import { useSessionSearch, type FilterMode } from "@/hooks/useSessionSearch"
+import { useSessionSearch, PINNED_GROUP_KEY, type FilterMode } from "@/hooks/useSessionSearch"
 import { useSessionActions } from "@/hooks/useSessionActions"
+import { useShareSessionConfirm } from "@/hooks/useSessionConfirmDialogs"
 import { useEntityListInteractions } from "@/hooks/useEntityListInteractions"
 import { useFocusZone } from "@/hooks/keyboard"
 import { useEscapeInterrupt } from "@/context/EscapeInterruptContext"
@@ -261,6 +262,11 @@ export function SessionList({
     scrollViewportRef,
   })
 
+  // Pinned sessions float as the topmost group. Mirrors the collapse-key
+  // decision in useSessionSearch — skip in search mode and in the pinned
+  // ("已置顶") filter view, where a pinned split would re-count the same rows.
+  const groupPinnedTop = !isSearchMode && currentFilter?.kind !== 'flagged'
+
   const rowData = useMemo(() => {
     if (isSearchMode) {
       const matchingRows: SessionListRow[] = matchingFilterItems.map(item => ({ item }))
@@ -285,6 +291,24 @@ export function SessionList({
     // can insert header-only placeholder groups in the correct position.
     const rows: SessionListRow[] = flatItems.map(item => ({ item }))
 
+    // Pinned rows split off for the topmost group (they already arrive in
+    // lastMessageAt-descending order, which the pinned section keeps). When
+    // the pinned group is collapsed, flatItems no longer contains those rows
+    // and collapsedGroupsMeta's pinned entry provides the header-only count.
+    const pinnedMeta = collapsedGroupsMeta.find(m => m.key === PINNED_GROUP_KEY)
+    const pinnedRows: SessionListRow[] = groupPinnedTop ? rows.filter(r => r.item.isFlagged === true) : []
+    const unpinnedRows: SessionListRow[] = groupPinnedTop ? rows.filter(r => r.item.isFlagged !== true) : rows
+
+    const pinnedGroup: EntityListGroup<SessionListRow> | null = groupPinnedTop && (pinnedRows.length > 0 || !!pinnedMeta)
+      ? {
+          key: PINNED_GROUP_KEY,
+          label: t('session.pinnedGroup', { count: pinnedMeta ? pinnedMeta.count : pinnedRows.length }),
+          items: pinnedRows,
+          collapsible: true,
+          ...(pinnedMeta ? { collapsedCount: pinnedMeta.count } : {}),
+        }
+      : null
+
     if (groupingMode === 'unread') {
       // Two fixed buckets: unread on top, read below. Within each, items keep
       // the same `lastMessageAt`-descending order they already arrive in.
@@ -293,7 +317,7 @@ export function SessionList({
       // bucket is unambiguous (e.g. "Unread (0)").
       const unreadRows: SessionListRow[] = []
       const readRows: SessionListRow[] = []
-      for (const row of rows) {
+      for (const row of unpinnedRows) {
         if (row.item.hasUnread) unreadRows.push(row)
         else readRows.push(row)
       }
@@ -309,6 +333,7 @@ export function SessionList({
       const readCount = collapsedRead ? collapsedRead.count : readRows.length
 
       const orderedGroups: EntityListGroup<SessionListRow>[] = [
+        ...(pinnedGroup ? [pinnedGroup] : []),
         {
           key: 'unread-yes',
           label: t('session.unreadGroup', { count: unreadCount }),
@@ -338,7 +363,7 @@ export function SessionList({
 
       // Build groups from visible items
       const groupsByKey = new Map<string, { rows: SessionListRow[], statusId: string }>()
-      for (const row of rows) {
+      for (const row of unpinnedRows) {
         const statusId = getSessionStatus(row.item)
         const key = `status-${statusId}`
         if (!groupsByKey.has(key)) groupsByKey.set(key, { rows: [], statusId })
@@ -347,7 +372,8 @@ export function SessionList({
 
       // Insert collapsed placeholder groups
       for (const meta of collapsedGroupsMeta) {
-        if (!groupsByKey.has(meta.key)) {
+        // The pinned group is handled separately (rendered above the statuses).
+        if (meta.key !== PINNED_GROUP_KEY && !groupsByKey.has(meta.key)) {
           const statusId = meta.key.replace('status-', '')
           groupsByKey.set(meta.key, { rows: [], statusId })
         }
@@ -373,6 +399,9 @@ export function SessionList({
         return aOrder - bOrder
       })
 
+      // Pinned rides above every status group.
+      if (pinnedGroup) orderedGroups.unshift(pinnedGroup)
+
       // If only one group exists, disable collapsing — there's nothing to collapse into
       if (orderedGroups.length === 1) {
         orderedGroups[0].collapsible = false
@@ -388,7 +417,7 @@ export function SessionList({
     const groupsByKey = new Map<string, EntityListGroup<SessionListRow>>()
     const groupDates = new Map<string, Date>()
 
-    for (const row of rows) {
+    for (const row of unpinnedRows) {
       const day = startOfDay(new Date(row.item.lastMessageAt || 0))
       const groupKey = day.toISOString()
 
@@ -406,7 +435,9 @@ export function SessionList({
 
     // Insert collapsed placeholder groups (header-only, items: [])
     for (const meta of collapsedGroupsMeta) {
-      if (!groupsByKey.has(meta.key)) {
+      // The pinned group is handled separately (rendered above the dates) —
+      // its key is not a date, so it must not enter this loop.
+      if (meta.key !== PINNED_GROUP_KEY && !groupsByKey.has(meta.key)) {
         const date = new Date(meta.key)
         groupsByKey.set(meta.key, {
           key: meta.key,
@@ -426,33 +457,40 @@ export function SessionList({
 
     const orderedGroups = orderedKeys.map(key => groupsByKey.get(key)!)
 
+    // Pinned rides above every date group.
+    if (pinnedGroup) orderedGroups.unshift(pinnedGroup)
+
     // If only one group exists, disable collapsing — there's nothing to collapse into
     if (orderedGroups.length === 1) {
       orderedGroups[0].collapsible = false
     }
 
     return {
-      rows,
+      rows: [...pinnedRows, ...unpinnedRows],
       groups: orderedGroups,
     }
-  }, [isSearchMode, matchingFilterItems, otherResultItems, flatItems, groupingMode, sessionStatuses, collapsedGroupsMeta, t])
+  }, [isSearchMode, matchingFilterItems, otherResultItems, flatItems, groupingMode, sessionStatuses, collapsedGroupsMeta, groupPinnedTop, t])
 
   const flatRows = rowData.rows
 
   const collapseAllGroups = useCallback(() => {
+    const collapsePinned = groupPinnedTop && items.some(item => item.isFlagged === true)
     if (groupingMode === 'status') {
       const allKeys = new Set(items.map(item => `status-${getSessionStatus(item)}`))
+      if (collapsePinned) allKeys.add(PINNED_GROUP_KEY)
       setCollapsedGroups(allKeys)
     } else if (groupingMode === 'unread') {
-      const allKeys = new Set(items.map(item => item.hasUnread ? 'unread-yes' : 'unread-no'))
+      const allKeys = new Set<string>(items.map(item => item.hasUnread ? 'unread-yes' : 'unread-no'))
+      if (collapsePinned) allKeys.add(PINNED_GROUP_KEY)
       setCollapsedGroups(allKeys)
     } else {
       const allKeys = new Set(items.map(item =>
         startOfDay(new Date(item.lastMessageAt || 0)).toISOString()
       ))
+      if (collapsePinned) allKeys.add(PINNED_GROUP_KEY)
       setCollapsedGroups(allKeys)
     }
-  }, [items, groupingMode])
+  }, [items, groupingMode, groupPinnedTop])
   const expandAllGroups = useCallback(() => {
     setCollapsedGroups(new Set())
   }, [])
@@ -586,6 +624,14 @@ export function SessionList({
     })
   }, [])
 
+  // --- Share confirm (first create of a public link) ---
+  // The dialog element is owned here (not inside the per-row menus) so it
+  // survives the dropdown/drawer unmounting when the Share item is tapped.
+  const { requestShare, confirmElement: shareConfirmElement } = useShareSessionConfirm()
+  const handleShareRequest = useCallback((item: SessionMeta) => {
+    requestShare({ id: item.id, name: getSessionTitle(item) })
+  }, [requestShare])
+
   const handleRenameSubmit = () => {
     if (renameSessionId && renameName.trim()) {
       onRename(renameSessionId, renameName.trim())
@@ -629,6 +675,7 @@ export function SessionList({
     onSelectSessionById: handleSelectSessionById,
     onOpenInNewWindow: handleOpenInNewWindow,
     onSendToWorkspace: (ids: string[]) => setSendToWorkspace(ids),
+    onShareRequest: handleShareRequest,
     onFocusZone: handleFocusZone,
     onKeyDown: handleKeyDown,
     sessionStatuses,
@@ -648,6 +695,7 @@ export function SessionList({
     onArchive, handleArchiveWithToast, onUnarchive, handleUnarchiveWithToast,
     onMarkUnread, handleDeleteWithToast, onLabelsChange,
     handleSelectSessionById, handleOpenInNewWindow, setSendToWorkspace, handleFocusZone, handleKeyDown,
+    handleShareRequest,
     sessionStatuses, flatLabels, labels, resolvedSearchQuery,
     focusedSessionId, selectionStore.state.selected, isMultiSelectActive,
     sessionOptions, contentSearchResults, activeChatMatchInfo, hasPendingPrompt, hasPendingQuestion,
@@ -786,6 +834,9 @@ export function SessionList({
         onSubmit={handleRenameSubmit}
         placeholder={t("session.enterSessionName")}
       />
+
+      {/* Share-confirm dialog (first create of a public link) */}
+      {shareConfirmElement}
     </div>
   )
 }

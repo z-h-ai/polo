@@ -49,6 +49,7 @@ import { projectEntryAtom, projectEntrySendNoticesAtom, isEntryPendingState } fr
 import { createEnterpriseWorkflowUrl } from '@/lib/enterprise-workflow-url'
 import { dispatchFocusInputEvent } from '@/components/app-shell/input/focus-input-events'
 import { getSessionTitle } from '@/utils/session'
+import { useShareSessionConfirm } from '@/hooks/useSessionConfirmDialogs'
 // Model resolution: connection.defaultModel (no hardcoded defaults)
 import { resolveEffectiveConnectionSlug, isSessionConnectionUnavailable } from '@config/llm-connections'
 
@@ -919,21 +920,15 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     }
   }, [sessionId])
 
-  // Sharing publishes the session directly — no confirm ask (POO-166), same as
-  // the session-menu path in `useSessionMenuActions`.
-  // Share action handlers
-  const handleShare = React.useCallback(async () => {
-    const result = await window.electronAPI.sessionCommand(sessionId, { type: 'shareToViewer' }) as { success: boolean; url?: string; error?: string } | undefined
-    if (result?.success && result.url) {
-      await navigator.clipboard.writeText(result.url)
-      toast.success(t('toast.linkCopied'), {
-        description: result.url,
-        action: { label: t('sendToWorkspace.open'), onClick: () => window.electronAPI.openUrl(result.url!) },
-      })
-    } else {
-      toast.error(t('toast.failedToShare'), { description: result?.error || t('toast.unknownError') })
-    }
-  }, [sessionId, t])
+  // Share action handlers — the first create of a public link now asks for
+  // confirmation (naming the session and stating that anyone with the link
+  // can view it); replaces the old POO-166 one-tap publish. Stop-sharing and
+  // update-share stay one reversible tap. The confirmed write itself is the
+  // shared `shareSessionToViewer` routine (see `useSessionMenuActions`).
+  const { requestShare, confirmElement: shareConfirmElement } = useShareSessionConfirm()
+  const handleShare = React.useCallback(() => {
+    requestShare({ id: sessionId, name: displayTitle })
+  }, [requestShare, sessionId, displayTitle])
 
   const handleOpenInBrowser = React.useCallback(() => {
     if (sharedUrl) window.electronAPI.openUrl(sharedUrl)
@@ -1109,6 +1104,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       onSessionStatusChange={handleSessionStatusChange}
       onOpenInNewWindow={handleOpenInNewWindow}
       onDelete={handleDelete}
+      onShare={handleShare}
     />
   ) : null, [
     sessionMeta,
@@ -1125,6 +1121,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     handleSessionStatusChange,
     handleOpenInNewWindow,
     handleDelete,
+    handleShare,
   ])
 
   const compactTitleMenu = React.useMemo(() => (sessionMeta && isCompactMode) ? (
@@ -1144,6 +1141,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       onSessionStatusChange={handleSessionStatusChange}
       onOpenInNewWindow={handleOpenInNewWindow}
       onDelete={handleDelete}
+      onShare={handleShare}
     />
   ) : null, [
     sessionMeta,
@@ -1162,6 +1160,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     handleSessionStatusChange,
     handleOpenInNewWindow,
     handleDelete,
+    handleShare,
   ])
 
   // Handle missing session - loading or deleted
@@ -1406,6 +1405,9 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         onSubmit={handleRenameSubmit}
         placeholder={t('chat.enterSessionName')}
       />
+      {/* Share-confirm dialog (first create of a public link) — lives at page
+          level so it survives the header dropdown / compact drawer closing. */}
+      {shareConfirmElement}
       {projectScope && (
         <ShareToProjectDialog
           open={shareTarget !== null}

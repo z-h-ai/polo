@@ -59,6 +59,31 @@ export interface SessionMenuActions {
   revokeShare: () => Promise<void>
 }
 
+// Minimal translator shape for the standalone share routine (kept testable
+// without i18next generics; the real `t` from useTranslation satisfies it).
+type Translate = (key: string, options?: Record<string, unknown>) => string
+
+/**
+ * Publish the session to the viewer and copy the resulting link. The actual
+ * share write — used by the session-menu path and (after the confirm ask in
+ * `useShareSessionConfirm`) by the chat-header path alike.
+ */
+export async function shareSessionToViewer(sessionId: string, t: Translate): Promise<void> {
+  const result = await window.electronAPI.sessionCommand(sessionId, { type: 'shareToViewer' }) as { success: boolean; url?: string; error?: string } | undefined
+  if (result?.success && result.url) {
+    await navigator.clipboard.writeText(result.url)
+    toast.success(t('toast.linkCopied'), {
+      description: result.url,
+      action: {
+        label: t('common.open'),
+        onClick: () => window.electronAPI.openUrl(result.url!),
+      },
+    })
+  } else {
+    toast.error(t('toast.failedToShare'), { description: result?.error || t('toast.unknownError') })
+  }
+}
+
 // SOH (U+0001) — non-printable so it can't collide with label IDs (which
 // validate to [a-z0-9-]) or values (which may themselves contain '::').
 const LABEL_KEY_SEPARATOR = String.fromCharCode(1)
@@ -130,22 +155,13 @@ export function useSessionMenuActions({
     onLabelsChange(next)
   }, [onLabelsChange])
 
-  // Sharing publishes the session directly — no confirm ask (POO-166): the
-  // result toast surfaces the link, and revoke lives one menu entry away.
+  // Publishing the session: the RPC + clipboard + toast routine lives in the
+  // exported `shareSessionToViewer`. POO-166 kept this a single tap; the
+  // UX ruling now puts the first-create confirmation at the entry points
+  // (via `useShareSessionConfirm`), so what lands here is the confirmed
+  // write — stop-sharing and update-share stay one reversible tap.
   const share = React.useCallback(async () => {
-    const result = await window.electronAPI.sessionCommand(sessionId, { type: 'shareToViewer' }) as { success: boolean; url?: string; error?: string } | undefined
-    if (result?.success && result.url) {
-      await navigator.clipboard.writeText(result.url)
-      toast.success(t('toast.linkCopied'), {
-        description: result.url,
-        action: {
-          label: t('common.open'),
-          onClick: () => window.electronAPI.openUrl(result.url!),
-        },
-      })
-    } else {
-      toast.error(t('toast.failedToShare'), { description: result?.error || t('toast.unknownError') })
-    }
+    await shareSessionToViewer(sessionId, t)
   }, [sessionId, t])
 
   const showInFinder = React.useCallback(() => {
