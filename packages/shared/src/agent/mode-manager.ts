@@ -2019,13 +2019,18 @@ export function shouldAllowToolInMode(
       // safeMode metadata, or safe mode would block a tool the canonical
       // metadata marks `allow`. render_ui / generate_app join the canonical
       // set for the same reason (their visibility is gated separately via
-      // allowRenderUi / allowGenerateApp).
+      // allowRenderUi / allowGenerateApp). project_context_* join too: their
+      // visibility is the toolset-assembly gate (allowProjectContext) plus the
+      // handler's per-call facade re-auth — omitting the flag here silently
+      // drops them from this set, and safe mode would block a project-bound
+      // turn's read-only search/read as a session "write" (POO-214).
       const safeAllowedSessionTools = getSessionSafeAllowedToolNames({
         prefix: 'mcp__session__',
         includeDeveloperFeedback: FEATURE_FLAGS.developerFeedback,
         allowRequestUserInput: true,
         allowRenderUi: true,
         allowGenerateApp: true,
+        allowProjectContext: true,
       });
 
       if (safeAllowedSessionTools.has(toolName)) {
