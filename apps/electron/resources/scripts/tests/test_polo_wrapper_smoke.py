@@ -90,8 +90,10 @@ exit "${POLO_WRAPPER_EXIT:-37}"
             check=False,
         )
         self.assertEqual(compat.returncode, 37)
+        # Locale-independent marker only: this test runs under the runner's
+        # ambient locale, so the human wording is asserted by
+        # test_compatibility_wrapper_localizes_deprecation_warning instead.
         self.assertIn("POLO_W_DEPRECATED_COMMAND", compat.stderr)
-        self.assertIn("已弃用", compat.stderr)
         record = json.loads(self.record.read_text(encoding="utf-8"))
         self.assertEqual(record["argv"], ["run", str(self.cli), "兼容", "space arg"])
 
