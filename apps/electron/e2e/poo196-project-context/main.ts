@@ -3040,21 +3040,14 @@ async function scenarioMembersAndCreate() {
   check('[S13] 记录子页返回后名册仍在（面板不关）', await js<boolean>(`window.__poo196.q('${T.membersPanel}')`))
   check('[S13] 前往企业管理入口存在（不驱跳转）', await js<boolean>(`window.__poo196.q('${T.membersOpenManagement}')`))
 
-  // UB3 (U6): 名册计数旁的待接受摘要——首屏已加载且无后页 → 精确「待接受 1 人」
-  // （seed 一条 active 未过期）；点击进邀请记录、返回仍回名册。member 无此入口
-  // 由 S14 钉死。
-  await until(() => js<boolean>(`window.__poo196.q('${T.membersPendingSummary}')`), 8000)
-  const pendingReady13 = await probeUntil(async () => ((await js<string>(`document.querySelector('${T.membersPendingSummary}')?.getAttribute('data-state') ?? 'missing'`)).trim()) === 'count', 8000)
-  const pendingState13 = (await js<string>(`document.querySelector('${T.membersPendingSummary}')?.getAttribute('data-state') ?? 'missing'`)).trim()
-  const pendingText13 = (await js<string>(`document.querySelector('${T.membersPendingSummary}')?.textContent ?? ''`)).trim()
-  const pendingCount13 = (await js<string>("String(window.__poo196.t('projectMembers.invitations.pendingCount', { count: 1 }))")).trim()
-  check('[S13][U6] 待接受摘要为精确计数（全加载，非假 0/至少）', pendingReady13 && pendingState13 === 'count' && pendingText13.includes(pendingCount13), { pendingState13, pendingText13, pendingCount13 })
-  await js<boolean>(`window.__poo196.click('${T.membersPendingSummary}')`)
-  await until(() => js<boolean>(`window.__poo196.q('${T.membersInvitations}')`), 8000)
-  check('[S13][U6] 摘要点击进入邀请记录子页', true)
-  await js<boolean>(`window.__poo196.click('${T.membersComposeBack}')`)
-  await until(() => js<boolean>(`window.__poo196.q('${T.membersRoster}')`), 8000)
-  check('[S13][U6] 记录返回后名册仍在（摘要子页回路闭合）', await js<boolean>(`window.__poo196.q('${T.membersPanel}')`))
+  // UB3 (U6) pending-invitation summary walkthrough retired: the roster-side
+  // pending summary and the in-panel invitations sub-page were removed in the
+  // POO-205 member-panel rework (39ea3b0f cleaned their i18n keys; the live
+  // ProjectMembersPanel has neither project-members-pending-summary nor
+  // project-members-invitations). These checks asserted that dead UI and can
+  // no longer run; re-add walkthroughs when the current panel gains an
+  // equivalent surface.
+
   await capture('s13-members-manager-overview')
 
   // 邀请步骤在面板内（不叠弹层）：目录页 → 无源空态的定向邀请次级路径。
@@ -4445,50 +4438,11 @@ async function scenarioBranchesAndLifecycle() {
   check('[S18] 第二分支成员面板打开管理形态（push + 管理动作在）', (await js<string>(`document.querySelector('${T.membersPanel}')?.getAttribute('data-mode')`)) === 'push'
     && await js<boolean>(`window.__poo196.q('${T.membersInviteAction}')`))
 
-  // UB3 (U6)：分页未知数——首页快照有后页 →「待接受至少 2 人」（过期不计、
-  // 重复 id 不计）；摘要点击进记录；加载更多补全快照；返回总览刷新一次后
-  // 重算为精确「待接受 3 人」。
-  await until(() => js<boolean>(`window.__poo196.q('${T.membersPendingSummary}')`), 8000)
-  const s18PendingReady = await probeUntil(async () => ((await js<string>(`document.querySelector('${T.membersPendingSummary}')?.getAttribute('data-state') ?? 'missing'`)).trim()) === 'at-least', 8000)
-  const s18PendingState = (await js<string>(`document.querySelector('${T.membersPendingSummary}')?.getAttribute('data-state') ?? 'missing'`)).trim()
-  const s18PendingText = (await js<string>(`document.querySelector('${T.membersPendingSummary}')?.textContent ?? ''`)).trim()
-  const s18AtLeast2 = (await js<string>("String(window.__poo196.t('projectMembers.invitations.pendingAtLeast', { count: 2 }))")).trim()
-  check('[S18][U6] 首页快照有后页 →「待接受至少 2 人」（过期不计）',
-    s18PendingReady && s18PendingState === 'at-least' && s18PendingText.includes(s18AtLeast2.slice(0, 6)) && !s18PendingText.includes('4'), { s18PendingState, s18PendingText })
-  await capture('s18-pending-at-least')
-  await js<boolean>(`window.__poo196.click('${T.membersPendingSummary}')`)
-  await until(() => js<boolean>(`window.__poo196.q('${T.membersInvitations}')`), 8000)
-  check('[S18][U6] 摘要点击进入分页记录列表', (await js<number>(`window.__poo196.count('${T.membersInvitationRow}')`)) === 3)
-  await js<boolean>(`window.__poo196.click('${T.membersInvitationsMore}')`)
-  await until(async () => (await js<number>(`window.__poo196.count('${T.membersInvitationRow}')`)) === 6, 8000)
-  check('[S18][U6] 加载更多后快照补全（6 行 = 5 条 staged + 1 重复 id）', true)
-  await focusMembersPanel()
-  await pressEscape()
-  await until(() => js<boolean>(`window.__poo196.q('${T.membersRoster}')`), 8000)
-  // 返回总览时刷新一次（快照语义）——刷新后仍从第一页读起，分页未结束
-  // 继续「至少」，绝不把第一页当全量。
-  await until(async () => ((await js<string>(`document.querySelector('${T.membersPendingSummary}')?.getAttribute('data-state') ?? 'missing'`)).trim()) === 'at-least', 8000)
-  const s18AgainText = (await js<string>(`document.querySelector('${T.membersPendingSummary}')?.textContent ?? ''`)).trim()
-  check('[S18][U6] 返回总览刷新一次后仍「至少 2」（不把第一页当全量）', s18AgainText.includes(s18AtLeast2.slice(0, 6)), { s18AgainText })
-  // 全加载面：关闭重开（openOverview 重读邀请记录），分页关闭后一次读全
-  // → 精确「待接受 3 人」（重复 id 只算一次、过期不计）。
-  await closeMembersPanel()
-  await runProgramDirect({ op: 'setPmInvitationPages', args: { pageSize: 0 } })
-  await openMembersPanel()
-  await until(() => js<boolean>(`window.__poo196.q('${T.membersRosterRow}')`), 8000)
-  await until(async () => ((await js<string>(`document.querySelector('${T.membersPendingSummary}')?.getAttribute('data-state') ?? 'missing'`)).trim()) === 'count', 8000)
-  const s18Exact = (await js<string>(`document.querySelector('${T.membersPendingSummary}')?.textContent ?? ''`)).trim()
-  const s18Exact3 = (await js<string>("String(window.__poo196.t('projectMembers.invitations.pendingCount', { count: 3 }))")).trim()
-  check('[S18][U6] 全加载后重算为精确「待接受 3 人」（重复 id 只算一次）', s18Exact.includes(s18Exact3.slice(0, 5)), { s18Exact })
-  // 错误面：邀请记录加载失败 → 仅「查看待接受邀请」，不报假 0。
-  await runProgramDirect({ op: 'setPmFault', args: { method: 'pmListProjectInvitations', fault: { code: 'pm_service_unavailable', once: true } } })
-  await closeMembersPanel()
-  await openMembersPanel()
-  await until(() => js<boolean>(`window.__poo196.q('${T.membersRosterRow}')`), 8000)
-  const s18ErrorState = await probeUntil(async () => ((await js<string>(`document.querySelector('${T.membersPendingSummary}')?.getAttribute('data-state') ?? 'missing'`)).trim()) === 'view-only', 8000)
-  const s18ErrorText = (await js<string>(`document.querySelector('${T.membersPendingSummary}')?.textContent ?? ''`)).trim()
-  const s18ViewPending = (await i18nText('projectMembers.invitations.viewPending')).trim()
-  check('[S18][U6] 记录加载失败 → 仅入口不报假数', s18ErrorState && s18ErrorText.includes(s18ViewPending.slice(0, 4)) && !s18ErrorText.includes('0'), { s18ErrorText })
+  // UB3 (U6) paginated pending-summary walkthrough retired with the same
+  // POO-205 panel rework as S13's summary block: the pending summary, the
+  // invitations sub-page and its fault-driven view-only state no longer exist
+  // in the live member panel. Fixture reset below is kept so later steps keep
+  // their role/fault state.
   await closeMembersPanel()
   await runProgramDirect({ op: 'setPmFault', args: { method: 'pmListProjectInvitations' } })
   await runProgramDirect({ op: 'setPmInvitationPages', args: { pageSize: 0 } })
