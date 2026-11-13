@@ -90,7 +90,8 @@ exit "${POLO_WRAPPER_EXIT:-37}"
             check=False,
         )
         self.assertEqual(compat.returncode, 37)
-        self.assertIn("deprecated", compat.stderr)
+        self.assertIn("POLO_W_DEPRECATED_COMMAND", compat.stderr)
+        self.assertIn("已弃用", compat.stderr)
         record = json.loads(self.record.read_text(encoding="utf-8"))
         self.assertEqual(record["argv"], ["run", str(self.cli), "兼容", "space arg"])
 
