@@ -13,10 +13,13 @@ import { getProjectContextAdmin } from '../admin-client'
 
 const capabilities = {
   featureEnabled: true,
-  role: 'owner',
+  // Narrow literals: toEqual's expected-parameter type is the admin contract's
+  // union ('owner' | 'manager' | 'member' etc.), and wide `string` inference
+  // here failed the overload resolution and turned Validate red.
+  role: 'owner' as const,
   canManage: true,
   canShare: true,
-  library: { status: 'ready' },
+  library: { status: 'ready' as const },
   limits: { maxUploadBytes: 1024, downloadUrlTtlSeconds: 60 },
 }
 
