@@ -1457,13 +1457,16 @@ function sanitizeModelContextBlock(block: string): string {
 }
 
 /**
- * POO-196: the one-shot system-reminder block for the staged project context
- * (bounded project header + the resolved @ references). Same runtime-only
- * discipline as the other one-shot reminders; `sanitizeModelContextBlock` is
- * a generic fence over reminder-tag injection, so the project block rides it.
+ * POO-196: the one-shot system-reminder block for the staged project context.
+ * POO-215 Q7: the staged block carries the bounded project header ONLY on the
+ * session's first user message — later sends stage just the resolved @
+ * references — so the wrapper copy must not assert the header's presence.
+ * Same runtime-only discipline as the other one-shot reminders;
+ * `sanitizeModelContextBlock` is a generic fence over reminder-tag injection,
+ * so the project block rides it.
  */
 export function buildProjectModelContextReminder(block: string): string {
-  return `<system-reminder>以下是本项目共享文件区的内容摘录与 @ 引用的文件正文（检索于发送时）。回答时请依据这些内容；@ 引用的文件若标注未成功读取，请如实说明而不是假设其内容。\n\n${sanitizeModelContextBlock(block)}\n</system-reminder>`
+  return `<system-reminder>以下是本项目共享文件区的上下文（检索于发送时）：首轮含项目概况，其余为本轮 @ 引用文件的正文。回答时请依据这些内容；@ 引用的文件若标注未成功读取，请如实说明而不是假设其内容；需要更多项目资料时，用 project_context_search 检索、project_context_read 读取。\n\n${sanitizeModelContextBlock(block)}\n</system-reminder>`
 }
 
 /**
