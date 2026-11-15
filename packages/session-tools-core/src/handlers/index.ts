@@ -49,8 +49,8 @@ export { handleRequestUserInput } from './request-user-input.ts';
 // Goal Update (POO-134 structured goal reporting)
 export { handleGoalUpdate } from './goal-update.ts';
 
-// Project Context (POO-196 shared project file area)
-export { handleProjectContextSearch, handleProjectContextRead } from './project-context.ts';
+// Project Context (POO-196 shared project file area; POO-215 distillation)
+export { handleProjectContextSearch, handleProjectContextRead, handleProjectContextSuggest } from './project-context.ts';
 
 // Update Preferences
 export { handleUpdatePreferences } from './update-preferences.ts';

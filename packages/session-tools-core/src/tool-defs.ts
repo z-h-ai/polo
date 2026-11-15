@@ -57,8 +57,8 @@ import {
   handleListTaskSubscriptions,
   handleEmitTaskEvent,
 } from './handlers/task-events.ts';
-import { handleProjectContextSearch, handleProjectContextRead } from './handlers/project-context.ts';
-import { ProjectContextSearchArgsSchema, ProjectContextReadArgsSchema } from './project-context-types.ts';
+import { handleProjectContextSearch, handleProjectContextRead, handleProjectContextSuggest } from './handlers/project-context.ts';
+import { ProjectContextSearchArgsSchema, ProjectContextReadArgsSchema, ProjectContextSuggestArgsSchema } from './project-context-types.ts';
 
 // ============================================================
 // Canonical Zod Schemas
@@ -1095,6 +1095,16 @@ Only files shared inside THIS project are searched — never assume content from
 Only files whose content is indexed can be read; when the content is not ready yet you get an explicit error instead of text. Relay that error as-is: NEVER fabricate or guess file content.
 `,
 
+  project_context_suggest: `Offer the user distilled knowledge entries for deposit into the project's shared file area (POO-215). Calling this shows a confirmation checklist in the chat; NOTHING is written until the user confirms, so this is a suggestion, not a save.
+
+**When to call (strict):**
+- ONLY when this turn produced a clearly reusable artifact for the whole team: a decision, a working SOP, a specification, a final deliverable, or a resolved conclusion.
+- Call it ONCE per turn, at the END of your answer, after the content is final.
+- NEVER call it for intermediate steps, raw transcripts, trivial answers, or after the user already declined a suggestion for the same content.
+- Distill, do not quote: each entry must be a self-contained markdown document (title + structured body) a colleague could read without this conversation.
+
+**Entry rules:** 1-5 entries per call; each title ≤ 120 chars; each body ≤ 20000 chars; at most 4 suggested tag ids drawn from the project tag vocabulary (requirement, design, tech, meeting, data, source, stage).`,
+
 } as const;
 
 // ============================================================
@@ -1212,6 +1222,10 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   // fail closed even if a stale registration still advertises them).
   { name: 'project_context_search', description: TOOL_DESCRIPTIONS.project_context_search, inputSchema: ProjectContextSearchArgsSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleProjectContextSearch },
   { name: 'project_context_read', description: TOOL_DESCRIPTIONS.project_context_read, inputSchema: ProjectContextReadArgsSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleProjectContextRead },
+  // POO-215 U1: the suggestion itself writes nothing — but it OPENS a write
+  // path (the user-confirmed deposit), so it is gated out of safe mode and is
+  // NOT readOnly, exactly like the other user-disposition tools.
+  { name: 'project_context_suggest', description: TOOL_DESCRIPTIONS.project_context_suggest, inputSchema: ProjectContextSuggestArgsSchema, executionMode: 'registry', safeMode: 'block', readOnly: false, handler: handleProjectContextSuggest },
 ];
 
 export interface SessionToolFilterOptions {
@@ -1301,7 +1315,7 @@ export function getSessionToolDefs(options?: SessionToolFilterOptions): SessionT
     if (!allowGoalUpdate && def.name === GOAL_UPDATE_TOOL_NAME) {
       return false;
     }
-    if (!allowProjectContext && (def.name === 'project_context_search' || def.name === 'project_context_read')) {
+    if (!allowProjectContext && (def.name === 'project_context_search' || def.name === 'project_context_read' || def.name === 'project_context_suggest')) {
       return false;
     }
     return true;

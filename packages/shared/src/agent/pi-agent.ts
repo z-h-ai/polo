@@ -1897,7 +1897,8 @@ export class PiAgent extends BaseAgent {
       // POO-196: project context tools only exist on turns whose session is
       // bound to the currently committed enterprise project — a stale
       // registration must never expose project files outside the fence.
-      if ((toolName === 'project_context_search' || toolName === 'project_context_read') && !this.allowProjectContext) {
+      // POO-215: the distillation suggestion rides the same gate.
+      if ((toolName === 'project_context_search' || toolName === 'project_context_read' || toolName === 'project_context_suggest') && !this.allowProjectContext) {
         return {
           content: '当前会话不在项目共享范围内',
           isError: true,

@@ -303,3 +303,41 @@ describe('createProjectContextToolFacade — authorized project session', () => 
     }
   })
 })
+
+describe('createProjectContextToolFacade — suggest gate (POO-215 U1)', () => {
+  it('answers ok for an authorized project session — no admin call, no write', async () => {
+    const facade = createProjectContextToolFacade({
+      deps: makeDeps([{ id: SESSION_ID, productSpaceId: SPACE_ID, projectId: PROJECT_ID, workspaceId: WORKSPACE_ID }]),
+      sessionId: SESSION_ID,
+      workspaceId: WORKSPACE_ID,
+    })
+    expect(facade).not.toBeNull()
+    const result = await facade!.suggest()
+    expect(result).toEqual({ ok: true })
+  })
+
+  it('answers not-okay when the session lost its project binding mid-turn', async () => {
+    const sessions: Array<{ id: string; productSpaceId?: string; projectId?: string; workspaceId?: string }> = [
+      { id: SESSION_ID, productSpaceId: SPACE_ID, projectId: PROJECT_ID, workspaceId: WORKSPACE_ID },
+    ]
+    const deps = makeDeps(sessions)
+    const facade = createProjectContextToolFacade({ deps, sessionId: SESSION_ID, workspaceId: WORKSPACE_ID })
+    expect(facade).not.toBeNull()
+
+    // Mid-turn rebinding: the immutable projectId leaves the session record.
+    sessions[0] = { id: SESSION_ID, productSpaceId: SPACE_ID, workspaceId: WORKSPACE_ID }
+    const result = await facade!.suggest()
+    expect(result).toEqual({ ok: false, error: 'not_authorized' })
+  })
+
+  it('answers not-okay once the fence no longer matches the session space', async () => {
+    const deps = makeDeps([{ id: SESSION_ID, productSpaceId: SPACE_ID, projectId: PROJECT_ID, workspaceId: WORKSPACE_ID }])
+    const facade = createProjectContextToolFacade({ deps, sessionId: SESSION_ID, workspaceId: WORKSPACE_ID })
+    expect(facade).not.toBeNull()
+
+    // The committed active space moves away from the session's bound space.
+    setRuntimeActiveProductSpace('space-elsewhere', 'enterprise')
+    const result = await facade!.suggest()
+    expect(result).toEqual({ ok: false, error: 'not_authorized' })
+  })
+})

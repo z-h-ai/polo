@@ -19,7 +19,10 @@ import { errorResponse, successResponse } from '../response.ts';
 import {
   ProjectContextSearchArgsSchema,
   ProjectContextReadArgsSchema,
+  ProjectContextSuggestArgsSchema,
+  PC_DISTILL_RESULT_MARKER,
   type ProjectContextSearchHit,
+  type ProjectContextSuggestion,
 } from '../project-context-types.ts';
 
 const PROJECT_CONTEXT_TOOLS_UNAVAILABLE = '当前会话不在项目共享范围内';
@@ -111,4 +114,50 @@ export async function handleProjectContextRead(ctx: SessionToolContext, args: un
 
   const header = `${parsed.data.assetId} v${result.version}${result.truncated ? ' (内容已截断)' : ''}`;
   return successResponse(`${header}\n${result.content}`);
+}
+
+/**
+ * POO-215 U1: the distillation-suggestion hand-off. The call NEVER writes to
+ * the project library (adjudication Q5: model suggests, user disposes) — it
+ * only verifies the session is still inside the authorized project fence and
+ * then hands the distilled entries to the renderer through a marker-tagged
+ * JSON envelope, which the distillation checklist card parses. The model's
+ * readable receipt rides inside that envelope.
+ */
+export async function handleProjectContextSuggest(ctx: SessionToolContext, args: unknown): Promise<ToolResult> {
+  const facade = ctx.getProjectContext?.();
+  if (!facade) {
+    return errorResponse(PROJECT_CONTEXT_TOOLS_UNAVAILABLE);
+  }
+
+  const parsed = parseArgs(ProjectContextSuggestArgsSchema, args);
+  if (!parsed.ok) {
+    return errorResponse(`Invalid project_context_suggest arguments: ${parsed.error}`);
+  }
+
+  try {
+    const gate = await facade.suggest();
+    if (!gate.ok) {
+      return errorResponse('当前会话不在项目共享范围内，无法发起沉淀建议');
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return errorResponse(`project_context_suggest failed: ${message}`);
+  }
+
+  const suggestions: ProjectContextSuggestion[] = parsed.data.entries.map((entry, index) => ({
+    id: `s${index + 1}`,
+    title: entry.title,
+    body: entry.body,
+    suggestedTags: entry.suggestedTags,
+  }));
+  const envelope = {
+    marker: PC_DISTILL_RESULT_MARKER,
+    accepted: suggestions.length,
+    message: `已向用户展示 ${suggestions.length} 条沉淀建议，等待用户勾选确认；用户确认后才会写入项目共享文件区，请勿为相同内容重复建议。`,
+    suggestions,
+  };
+  // The envelope is the tool result verbatim: the renderer parses it by
+  // marker, and the model reads the same receipt it shows the user.
+  return successResponse(JSON.stringify(envelope));
 }
