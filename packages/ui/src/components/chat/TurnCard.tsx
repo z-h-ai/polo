@@ -39,6 +39,7 @@ import { parseDiffFromFile, type FileContents } from '@pierre/diffs'
 import { getDiffStats, getUnifiedDiffStats } from '../code-viewer'
 import { TurnCardActionsMenu } from './TurnCardActionsMenu'
 import { GenUICard, mergeGenUiComponents, parseGenUiComponents } from './GenUICard'
+import { DistillSuggestionCard, isDistillSuggestToolName, parseDistillSuggestions, type DistillEntryResult, type DistillSuggestion } from './DistillSuggestionCard'
 import { extractGenUiSkeletons, isRenderUiActivityToolName, type GenUiSkeleton } from './genuiSkeleton'
 import { useGenUiToolInputPartials, getGenUiToolInputPartials, clearGenUiToolInputDelta } from './genuiToolInputDeltas'
 import {
@@ -373,6 +374,11 @@ export interface TurnCardProps {
   compactMode?: boolean
   /** Callback to branch the session from a specific message */
   onBranch?: (messageId: string, options?: { newPanel?: boolean }) => void
+  /** POO-215 U1: deposit round-trip behind the distillation checklist card
+   * (storeAttachment → prepare → pcUploadFile → pcSetConfirmed, owned by the
+   * host renderer). Absent (non-project surface) → the card renders without
+   * the confirm action instead of promising an unkeepable one. */
+  onDistillConfirm?: (entries: Array<{ id: string; title: string; body: string; suggestedTags: string[] }>) => Promise<DistillEntryResult[]>
   /** Callback to add an annotation to a response message */
   onAddAnnotation?: (messageId: string, annotation: AnnotationV1) => void
   /** Callback to remove a persisted annotation from a response message */
@@ -557,6 +563,9 @@ function getToolDisplayName(name: string): string {
     'set_session_status': i18n.t('turnCard.setSessionStatus'),
     'get_session_info': i18n.t('turnCard.getSessionInfo'),
     'list_sessions': i18n.t('turnCard.listSessions'),
+    // POO-215 U1: the distillation suggestion opens the confirm card below;
+    // the row reads as the action, not the raw snake_case name.
+    'project_context_suggest': i18n.t('turnCard.projectContextSuggest'),
   }
 
   return displayNames[stripped] || stripped
@@ -604,6 +613,11 @@ function formatToolInput(
   // For generate_app: same as render_ui — the canvas card renders below, and
   // the HTML input plus the marker line would be pure noise
   if (toolName === 'mcp__session__generate_app') return ''
+
+  // POO-215 U1: the distillation checklist card renders the entries; dumping
+  // the (potentially 100KB) markdown input here is pure noise. Both name
+  // forms — bare registry name and session MCP prefix.
+  if (toolName === 'project_context_suggest' || toolName === 'mcp__session__project_context_suggest') return ''
 
   const parts: string[] = []
 
@@ -2762,6 +2776,7 @@ export const TurnCard = React.memo(function TurnCard({
   hasEditOrWriteActivities,
   todos,
   renderActionsMenu,
+  onDistillConfirm,
   onAcceptPlan,
   onAcceptPlanWithCompact,
   isLastResponse,
@@ -2980,6 +2995,17 @@ export const TurnCard = React.memo(function TurnCard({
         .filter((call): call is GenUiAppCardProps => call !== null)
     ),
     [sortedActivities, sessionId]
+  )
+
+  // POO-215 U1: the distillation checklist card — one card per completed
+  // project_context_suggest call in the turn. Failed calls and unparseable
+  // envelopes render nothing rather than a broken checklist.
+  const distillSuggestionGroups = useMemo(
+    () => sortedActivities
+      .filter(a => a.type === 'tool' && isDistillSuggestToolName(a.toolName) && a.status === 'completed')
+      .map(a => ({ key: a.id, suggestions: parseDistillSuggestions(a.content) }))
+      .filter((group): group is { key: string; suggestions: DistillSuggestion[] } => group.suggestions !== null),
+    [sortedActivities]
   )
 
   // Don't render if nothing to show and turn is complete
@@ -3228,6 +3254,16 @@ export const TurnCard = React.memo(function TurnCard({
           version={call.version}
           sessionId={call.sessionId}
           className="mt-2"
+        />
+      ))}
+
+      {/* POO-215 U1: distillation checklist cards - visible without expanding
+          activities; the deposit round-trip rides onDistillConfirm. */}
+      {distillSuggestionGroups.map(group => (
+        <DistillSuggestionCard
+          key={group.key}
+          suggestions={group.suggestions}
+          onConfirm={onDistillConfirm}
         />
       ))}
 

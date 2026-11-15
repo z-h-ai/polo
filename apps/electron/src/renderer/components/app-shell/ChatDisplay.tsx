@@ -59,6 +59,7 @@ import {
   isAnnotationFollowUpSent,
   extractAnnotationSelectedText,
   normalizeFollowUpText,
+  type DistillEntryResult,
   type Turn,
   type AssistantTurn,
   type UserTurn,
@@ -293,6 +294,10 @@ interface ChatDisplayProps {
   projectShareEnabled?: boolean
   /** Called with the user message the user wants to land in the project library. */
   onShareToProject?: (message: Message) => void
+  /** POO-215 U1: deposit round-trip behind the distillation checklist card.
+   * Present only in an enterprise project session; absent → the card renders
+   * without the confirm action. */
+  onDistillConfirm?: (entries: Array<{ id: string; title: string; body: string; suggestedTags: string[] }>) => Promise<DistillEntryResult[]>
   /**
    * POO-196 UB4 (U13): the project-composer presentation (stable placeholder
    * following the real sendMessageKey preference + the「输入帮助」toolbar
@@ -564,6 +569,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   gateNotice,
   projectShareEnabled = false,
   onShareToProject,
+  onDistillConfirm,
   projectComposer,
 }, ref) {
   const { t, i18n: i18nInstance } = useTranslation()
@@ -2053,6 +2059,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         expandedActivityGroups={expandedActivityGroups}
                         onExpandedActivityGroupsChange={setExpandedActivityGroups}
                         todos={turn.todos}
+                        onDistillConfirm={onDistillConfirm}
                         onOpenFile={onOpenFile}
                         onOpenUrl={onOpenUrl}
                         onOpenSourceUrl={onOpenSourceUrl}
