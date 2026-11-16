@@ -8,8 +8,10 @@ import {
   PC_TAG_MAX_COUNT,
   normalizeTagId,
   type PcAssetDto,
+  type PcCapabilitiesCompat,
   type PcUploadFileInput,
 } from '@polo-ai/shared/protocol'
+import { i18n } from '@polo-ai/shared/i18n'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -75,6 +77,14 @@ export interface AssetUploadDialogProps {
    * upload batch entries has no use for the checklist either).
    */
   scope?: PcScope
+  /**
+   * POO-215 U6: the admin's parsing capability block — which formats the
+   * pipeline makes searchable vs. stores only, and the parse budget the
+   * processing copy quotes. Absent from an older admin
+   * (poo196-contract-r2): the hint degrades to the static conservative copy
+   * instead of naming formats we do not actually know.
+   */
+  parsing?: PcCapabilitiesCompat['parsing']
   /**
    * The batch's per-entry write — deliberately SEPARATE from `onSubmit`:
    * the single-file write closes the dialog on success, a batch entry must
@@ -513,12 +523,61 @@ function looksLikeZipPath(path: string): boolean {
   return path.toLowerCase().endsWith('.zip')
 }
 
+/**
+ * POO-215 U6: the locale-aware join for the capability token lists ("pdf,
+ * docx and txt" / "pdf、docx、txt"). `unit` type keeps extension lists
+ * natural — the tokens are bare extensions, never sentences.
+ */
+export function formatParsingTokens(tokens: readonly string[]): string {
+  return new Intl.ListFormat(i18n.resolvedLanguage, { type: 'unit' }).format(tokens)
+}
+
+/**
+ * The two-tier format explanation (POO-215 U6): what the pipeline parses into
+ * full-text search, what it only stores, and how long parsing usually takes —
+ * straight from `capabilities.parsing`. When the block is absent (an older
+ * admin), the hint degrades to one conservative sentence that names no
+ * format at all: promising "pdf is searchable" we cannot verify is worse than
+ * saying nothing specific.
+ */
+export function AssetParsingHint({ parsing }: { parsing?: PcCapabilitiesCompat['parsing'] }) {
+  const { t } = useTranslation()
+  if (!parsing) {
+    return (
+      <p className="text-[11px] text-muted-foreground" data-testid="pc-upload-parsing-hint">
+        {t('projectContext.upload.parsing.fallback')}
+      </p>
+    )
+  }
+  return (
+    <div
+      className="flex flex-col gap-0.5 rounded-[10px] border border-border bg-foreground/[0.02] px-3 py-2 text-[11px] text-muted-foreground"
+      data-testid="pc-upload-parsing-hint"
+    >
+      {parsing.searchable.length > 0 && (
+        <span data-testid="pc-upload-parsing-searchable">
+          {t('projectContext.upload.parsing.searchable', { formats: formatParsingTokens(parsing.searchable) })}
+        </span>
+      )}
+      {parsing.storeOnly.length > 0 && (
+        <span data-testid="pc-upload-parsing-store-only">
+          {t('projectContext.upload.parsing.storeOnly', { formats: formatParsingTokens(parsing.storeOnly) })}
+        </span>
+      )}
+      <span data-testid="pc-upload-parsing-budget">
+        {t('projectContext.upload.parsing.budget', { seconds: parsing.expectedParsingSeconds })}
+      </span>
+    </div>
+  )
+}
+
 export function AssetUploadDialog({
   open,
   maxUploadBytes,
   onClose,
   onSubmit,
   scope,
+  parsing,
   onBatchEntry,
   onBatchSettled,
 }: AssetUploadDialogProps) {
@@ -682,6 +741,10 @@ export function AssetUploadDialog({
                   hidePickZone={batchAvailable}
                   presetPath={singlePickPath}
                 />
+                {/* POO-215 U6: the two-tier format explanation sits under the
+                    form so it is readable at pick time; the static fallback
+                    covers an admin without the parsing block. */}
+                <AssetParsingHint parsing={parsing} />
                 {batchAvailable && (
                   <div className="flex flex-col gap-2" data-testid="pc-upload-batch-entries">
                     {/* The dialog's smart pick zone (POO-210 D4): one button

@@ -61,6 +61,10 @@ export interface AssetRowActionHandlers {
   /** S-05: ask the admin to re-run the whole space's index build. Only shown
    * for a failed current version — and only when the caller can act on it. */
   onRebuild?: (asset: PcAssetDto) => void
+  /** POO-215 U5: retry THIS asset's failed index build — the per-file remedy
+   * behind the failed state (`POST …/assets/{assetId}/index-retry`),
+   * deliberately not the space-wide rebuild. Shown for a failed version. */
+  onIndexRetry?: (asset: PcAssetDto) => void
 }
 
 export interface AssetRowProps extends AssetRowActionHandlers {
@@ -68,6 +72,9 @@ export interface AssetRowProps extends AssetRowActionHandlers {
   mode?: 'active' | 'trash'
   canManage?: boolean
   canReplace?: boolean
+  /** POO-215 U5: the viewer may act on this row's per-file retry (the asset's
+   * uploader or a manager — the admin re-checks authoritatively). */
+  canIndexRetry?: boolean
   canDownload?: boolean
   /** Row-level pending flag while this asset's in-flight mutation resolves. */
   busy?: boolean
@@ -78,6 +85,7 @@ export function AssetRow({
   mode = 'active',
   canManage = false,
   canReplace = false,
+  canIndexRetry = false,
   canDownload = true,
   busy = false,
   onPreview,
@@ -88,6 +96,7 @@ export function AssetRow({
   onDelete,
   onRestore,
   onRebuild,
+  onIndexRetry,
 }: AssetRowProps) {
   const { t } = useTranslation()
   const status = assetStatusBadge(asset, t)
@@ -208,9 +217,32 @@ export function AssetRow({
                 <span className="flex-1">{t('projectContext.actions.replace')}</span>
               </StyledDropdownMenuItem>
             )}
-            {/* S-05: a failed read is a space-level index fault, never a
-                per-file retry, so the entry states the scope and stays visible
-                (disabled with who must act) for members without the right. */}
+            {/* POO-215 U5: the per-file retry behind a failed version — the
+                admin re-queues exactly this asset's CURRENT version (uploader
+                or manager, re-checked server-side). Same honest face as the
+                rebuild entry: visible-disabled with who must act. */}
+            {onIndexRetry && asset.current.processing === 'failed' && (
+              canIndexRetry ? (
+                <StyledDropdownMenuItem onClick={() => onIndexRetry(asset)} data-testid={`pc-asset-action-index-retry-${asset.id}`}>
+                  <Icons.RotateCcw className="h-3.5 w-3.5" />
+                  <span className="flex-1">{t('projectContext.actions.indexRetry')}</span>
+                </StyledDropdownMenuItem>
+              ) : (
+                <StyledDropdownMenuItem
+                  disabled
+                  data-testid={`pc-asset-action-index-retry-${asset.id}`}
+                  data-retry-blocked="true"
+                >
+                  <Icons.RotateCcw className="h-3.5 w-3.5" />
+                  <span className="flex-1">{t('projectContext.actions.indexRetryNeedsUploaderOrManager')}</span>
+                </StyledDropdownMenuItem>
+              )
+            )}
+            {/* S-05: when the per-file retry above is not available (an old
+                admin without the U5 endpoint), the rebuild entry stays the
+                only remedy — a space-level index fault. It states the scope
+                and stays visible (disabled with who must act) for members
+                without the right. */}
             {onRebuild && asset.current.processing === 'failed' && (
               canManage ? (
                 <StyledDropdownMenuItem onClick={() => onRebuild(asset)} data-testid={`pc-asset-action-rebuild-${asset.id}`}>

@@ -310,6 +310,37 @@ export function ProjectFileLibrary({ scope, currentUserId, active = true, pinMut
     })
   }
 
+  // POO-215 U5: the failed row's per-file retry — one click, no scope
+  // confirm: it re-queues exactly this asset's CURRENT version (uploader or
+  // manager; the admin re-checks and answers pc_validation_error for a
+  // non-failed version). The accepted `{ jobId }` is the receipt; the admin
+  // flips the version to `processing` in the same transaction, so the
+  // refresh below picks the new badge up right away. The processing copy
+  // quotes the advertised parse budget when the capabilities carry one.
+  const handleIndexRetry = (asset: PcAssetDto) => {
+    const activeScope = scopeRef.current
+    void (async () => {
+      setBusyAssetId(asset.id)
+      try {
+        await window.electronAPI.pcIndexRetry({
+          workspaceId: activeScope.workspaceId,
+          productSpaceId: activeScope.productSpaceId,
+          projectId: activeScope.projectId,
+          assetId: asset.id,
+        })
+        const expectedSeconds = capabilities?.parsing?.expectedParsingSeconds
+        toast.success(expectedSeconds
+          ? t('projectContext.toast.indexRetryRequested', { seconds: expectedSeconds })
+          : t('projectContext.toast.indexRetryRequestedSlow'))
+        void refresh()
+      } catch (error) {
+        toast.error(t(projectContextErrorKey(error)))
+      } finally {
+        setBusyAssetId(null)
+      }
+    })()
+  }
+
   const handleDownload = async (asset: PcAssetDto) => {
     const activeScope = scopeRef.current
     setBusyAssetId(asset.id)
@@ -643,6 +674,7 @@ export function ProjectFileLibrary({ scope, currentUserId, active = true, pinMut
               busy={busyAssetId === asset.id || (previewLoading && preview?.asset.id === asset.id)}
               canManage={canManage}
               canReplace={canShare && !!currentUserId && asset.uploaderUserId === currentUserId}
+              canIndexRetry={canManage || (!!currentUserId && asset.uploaderUserId === currentUserId)}
               onPreview={handlePreview}
               onDownload={(target) => void handleDownload(target)}
               onReplace={handleReplace}
@@ -650,6 +682,7 @@ export function ProjectFileLibrary({ scope, currentUserId, active = true, pinMut
               onSetPinned={handleSetPinned}
               onDelete={handleDelete}
               onRebuild={handleRebuild}
+              onIndexRetry={handleIndexRetry}
             />
           ))}
           {hasMore && (
@@ -672,6 +705,7 @@ export function ProjectFileLibrary({ scope, currentUserId, active = true, pinMut
         onClose={() => setUploadOpen(false)}
         onSubmit={handleUploadSubmit}
         scope={scopeRef.current}
+        parsing={capabilities?.parsing}
         onBatchEntry={handleBatchEntrySubmit}
         onBatchSettled={handleBatchSettled}
       />
