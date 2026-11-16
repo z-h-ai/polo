@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import * as Icons from 'lucide-react'
-import type { PcAssetDto, PcCapabilitiesResponse } from '@polo-ai/shared/protocol'
+import type { PcAssetDto, PcCapabilitiesCompat } from '@polo-ai/shared/protocol'
 import { PC_LIST_LIMIT_DEFAULT } from '@polo-ai/shared/protocol'
 import { Button } from '@/components/ui/button'
 import { readRpcErrorCode } from '../../../shared/rpc-error-bridge'
@@ -40,7 +40,7 @@ export interface ProjectPinPaneProps {
 
 export function ProjectPinPane({ scope, active = true, onChanged }: ProjectPinPaneProps) {
   const { t } = useTranslation()
-  const [capabilities, setCapabilities] = React.useState<PcCapabilitiesResponse | null>(null)
+  const [capabilities, setCapabilities] = React.useState<PcCapabilitiesCompat | null>(null)
   const [capabilityState, setCapabilityState] = React.useState<PcCapabilityState>('idle')
   const [entries, setEntries] = React.useState<PcAssetDto[]>([])
   const [loading, setLoading] = React.useState(true)
@@ -119,7 +119,7 @@ export function ProjectPinPane({ scope, active = true, onChanged }: ProjectPinPa
     // never erase a feature-disabled state, and a disabled feature never
     // issues a doomed list call (consensus S-08+E-3).
     const token = ++seqRef.current
-    let caps: PcCapabilitiesResponse | null = null
+    let caps: PcCapabilitiesCompat | null = null
     let capsError: unknown = null
     try {
       const currentScope = scopeRef.current

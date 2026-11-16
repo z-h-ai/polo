@@ -2,7 +2,7 @@ import * as React from 'react'
 import type {
   PcAssetDto,
   PcAssetListResponse,
-  PcCapabilitiesResponse,
+  PcCapabilitiesCompat,
   PcListProcessingFilter,
 } from '@polo-ai/shared/protocol'
 import { PC_LIST_LIMIT_DEFAULT } from '@polo-ai/shared/protocol'
@@ -141,7 +141,7 @@ interface UseProjectAssetsOptions {
 }
 
 export interface UseProjectAssetsResult {
-  capabilities: PcCapabilitiesResponse | null
+  capabilities: PcCapabilitiesCompat | null
   /** The capability gate state machine — see PcCapabilityState. */
   capabilityState: PcCapabilityState
   /** i18n key describing why capabilities could not load, when they could not. */
@@ -207,7 +207,7 @@ export function pcCapabilityCopyKeys(state: PcCapabilityState): { titleKey: stri
 
 /** Derives the gate state from the capabilities answer (or its failure).
  * Shared with the Pin pane so every tab reads the same capability face. */
-export function capabilityStateOf(caps: PcCapabilitiesResponse | null, error: unknown): PcCapabilityState {
+export function capabilityStateOf(caps: PcCapabilitiesCompat | null, error: unknown): PcCapabilityState {
   if (caps) {
     if (!caps.featureEnabled) {
       return caps.disabledReason === 'storage_unavailable' ? 'storage_unavailable' : 'not_configured'
@@ -224,7 +224,7 @@ export function capabilityStateOf(caps: PcCapabilitiesResponse | null, error: un
 }
 
 export function useProjectAssets({ scope, enabled, active = true }: UseProjectAssetsOptions): UseProjectAssetsResult {
-  const [capabilities, setCapabilities] = React.useState<PcCapabilitiesResponse | null>(null)
+  const [capabilities, setCapabilities] = React.useState<PcCapabilitiesCompat | null>(null)
   const [capabilityState, setCapabilityState] = React.useState<PcCapabilityState>('idle')
   const [capabilitiesErrorKey, setCapabilitiesErrorKey] = React.useState<string | null>(null)
   const [page, setPage] = React.useState<PcAssetListResponse | null>(null)

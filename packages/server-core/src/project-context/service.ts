@@ -610,6 +610,29 @@ export async function pcRebuild(
   }
 }
 
+/**
+ * POO-215 U5: retry the index pipeline for ONE failed asset. Same gate set
+ * as the project-wide rebuild — the admin side owns the per-asset state
+ * check (a non-`failed` asset refuses with the stable `pc_validation_error`).
+ */
+export async function pcIndexRetry(
+  deps: HandlerDeps,
+  ctx: RequestContext,
+  input: { workspaceId: string; productSpaceId: string; projectId: string; assetId: string },
+): Promise<unknown> {
+  const scope = await requireProjectContextScope(ctx, input.workspaceId, deps)
+  assertRequestedSpace(scope, input.productSpaceId)
+  assertRequestedProject(input.projectId)
+  assertWritable(scope)
+  try {
+    const result = await theAdmin().indexRetry(input.productSpaceId, input.projectId, input.assetId)
+    assertScopeCurrent(scope)
+    return result
+  } catch (error) {
+    throw mapAdminFailure(error)
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* Send path: @ reference resolution + bounded project header          */
 /* ------------------------------------------------------------------ */

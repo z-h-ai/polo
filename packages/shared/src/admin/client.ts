@@ -2,7 +2,6 @@ import {browserPolicyResponseSchema,type BrowserPolicyResponse} from "./browser-
 import { SkillTurnBeginSchema, SkillTurnOperationSchema, SkillTurnReceiptSchema, type SkillTurnBegin, type SkillTurnReceipt } from './skill-turn-contract.ts';
 import {
   PC_ERROR_CODES,
-  PcCapabilitiesResponseSchema,
   PcAssetListResponseSchema,
   PcCompleteUploadResponseSchema,
   PcCreateAssetInputSchema,
@@ -20,7 +19,6 @@ import {
   PcUpdateAssetInputSchema,
   PcUploadGrantResponseSchema,
   type PcAssetListResponse,
-  type PcCapabilitiesResponse,
   type PcCompleteUploadResponse,
   type PcCreateAssetInput,
   type PcCreateUploadInput,
@@ -112,6 +110,13 @@ import {
   PmProductSpacesListR3ResponseSchema,
   type PmProductSpacesListR3Response,
 } from '../protocol/project-members';
+// POO-215 U6: capabilities read through the compat projection — the `parsing`
+// block is absent on an older admin, and this is the one read path that must
+// tolerate that (the GENERATED contract keeps the field required).
+import {
+  PcCapabilitiesCompatSchema,
+  type PcCapabilitiesCompat,
+} from '../protocol/project-context';
 import {
   AdminError,
   type AdminAuthConfig,
@@ -1615,13 +1620,27 @@ export class AdminClient {
     return encoded ? `?${encoded}` : '';
   }
 
-  /** GET /api/project-context/{id}/capabilities — feature gate, role and limits. */
-  async getProjectContextCapabilities(accessToken: string, productSpaceId: string, projectId: string): Promise<PcCapabilitiesResponse> {
+  /** GET /api/project-context/{id}/capabilities — feature gate, role and
+   * limits. Parsed through the COMPAT projection (POO-215 U6): an older
+   * admin (poo196-contract-r2) answers without the `parsing` block and the
+   * client must keep working — the upload UI degrades to static copy. */
+  async getProjectContextCapabilities(accessToken: string, productSpaceId: string, projectId: string): Promise<PcCapabilitiesCompat> {
     const response = await this.request<unknown>(
       this.projectContextPath(productSpaceId, '/capabilities', projectId),
       { method: 'GET', accessToken },
     );
-    return this.readSuccessResponse(response, PcCapabilitiesResponseSchema);
+    return this.readSuccessResponse(response, PcCapabilitiesCompatSchema);
+  }
+
+  /** POST /api/project-context/{id}/assets/{assetId}/index-retry — POO-215
+   * U5: re-queue the index pipeline for ONE failed asset. Response shape is
+   * the rebuild `{ jobId }` (contract C4: no new error code, no new schema). */
+  async retryProjectContextIndex(accessToken: string, productSpaceId: string, projectId: string, assetId: string): Promise<PcRebuildResponse> {
+    const response = await this.request<unknown>(
+      this.projectContextPath(productSpaceId, `/assets/${encodeURIComponent(assetId)}/index-retry`, projectId),
+      { method: 'POST', accessToken, body: {} },
+    );
+    return this.readSuccessResponse(response, PcRebuildResponseSchema);
   }
 
   /** GET /api/project-context/{id}/summary — bounded project overview. */

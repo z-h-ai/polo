@@ -4,6 +4,7 @@ import {
   PC_LIST_PROCESSING_FILTERS,
   PC_QUERY_MAX_CHARS,
   PC_TAG_MAX_CHARS,
+  PcCapabilitiesResponseSchema,
   PcRestoreInputSchema,
   PcSetConfirmedInputSchema,
   PcSetPinnedInputSchema,
@@ -242,6 +243,30 @@ export type PcSearchAssetsInput = z.output<typeof PcSearchAssetsInputSchema>
 
 export const PcRebuildInputSchema = PcIpcAssetScopeSchema.extend({}).strict()
 export type PcRebuildInput = z.output<typeof PcRebuildInputSchema>
+
+/**
+ * POO-215 U5: retry the index pipeline for ONE failed asset (admin
+ * `POST …/assets/{assetId}/index-retry`, C4 — the response reuses the
+ * rebuild shape `{ jobId }`, no new error code). Scope + assetId only.
+ */
+export const PcIndexRetryInputSchema = PcIpcAssetScopeSchema.extend({
+  assetId: PcAssetIdSchema,
+}).strict()
+export type PcIndexRetryInput = z.output<typeof PcIndexRetryInputSchema>
+
+/**
+ * POO-215 U6: the capabilities `parsing` block is a poo215-contract-r1
+ * addition. The GENERATED contract keeps it required (it mirrors the new
+ * admin), but the CLIENT must tolerate an older admin
+ * (poo196-contract-r2) that answers without it — so the read path parses
+ * through this projection where `parsing` is optional, and the upload UI
+ * degrades to static conservative copy when it is absent. The GENERATED
+ * file itself is byte-checked (`--check`) and never hand-edited.
+ */
+export const PcCapabilitiesCompatSchema = PcCapabilitiesResponseSchema.extend({
+  parsing: PcCapabilitiesResponseSchema.shape.parsing.optional(),
+}).strict()
+export type PcCapabilitiesCompat = z.output<typeof PcCapabilitiesCompatSchema>
 
 /* ------------------------------------------------------------------ */
 /* POO-210 batch upload staging (LOCAL_ONLY, transport-layer only)     */
