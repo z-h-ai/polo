@@ -222,3 +222,50 @@ facade 接口（:40-46）加：`suggest(input: { entriesCount: number }): Promis
 - **候选①界面未接**：`project_context_suggest` 工具已注册可用，但 U5/U6（解析反馈、上传格式预期）归 admin 线，本线未动。
 - **e2e 链路未真跑**：模型侧建议率、卡片在真实会话流中的渲染（含 compact 后 envelope 存活性）需 e2e 验收阶段覆盖；本线以组件/hook isolated + 工具层单测为界。
 - **spec.md / RESOURCES.md 未提交**：按派发约束留在任务目录，等用户授权。
+
+## 6. 候选①客户端整合回执（2026-11-15）
+
+admin 线契约冻结（`poo-215/project-index-release` worktree，`poo215-contract-r1`）后的客户端整合：契约再生 + U5 重试索引消费 + U6 上传格式两档说明消费。两批提交，全部在本分支，未 push。
+
+### 6.1 交付内容（两批提交）
+
+**批次 A · 契约再生 + indexRetry 传输层全链路（f08de0cd）**
+- `packages/shared/src/admin/project-context-contract.ts`（GENERATED 再生）：poo196-contract-r2 → poo215-contract-r1；capabilities 增 `parsing` strict 块（`searchable`/`storeOnly` token 表 ≤64×≤32 字符 + `expectedParsingSeconds` 正整数）；PC_PROCESSING_STATES 注释收窄（unsupported=引擎也不解析；failed=可走单资产重试端点）。admin 侧导出脚本 `--check` in sync（`npx tsx …/export-project-context-contract.ts --check`）
+- `packages/shared/src/protocol/project-context.ts`：`PcIndexRetryInputSchema`（scope+assetId）；**`PcCapabilitiesCompatSchema` 兼容投影**——GENERATED 的 `parsing` 必填对老 admin（poo196-contract-r2）会整块 parse 挂，compat 投影置 optional 且保留 strict，读取链全部走 compat
+- `packages/shared/src/protocol/channels.ts`：`INDEX_RETRY: 'pc:indexRetry'`
+- `packages/shared/src/admin/client.ts`：`getProjectContextCapabilities` 换 compat parse；新 `retryProjectContextIndex`（POST `…/assets/{assetId}/index-retry?projectId=…`，body `{}`，复用 `PcRebuildResponse{jobId}`——契约 C4 无新错误码新 schema）
+- `packages/server-core/src/project-context/admin-client.ts`：facade 接口+实现 `indexRetry`；capabilities 返回类型换 compat
+- `packages/server-core/src/project-context/service.ts`：`pcIndexRetry`（同 rebuild 门集：scope/space/project/assertWritable/mapAdminFailure；**角色裁决不落地**——admin 侧 `version.createdById===actor.sub || access.canManage`，assertWritable 只挡离线/空间只读）
+- `packages/server-core/src/handlers/rpc/project-context.ts`：INDEX_RETRY handle
+- `apps/electron/src/shared/types.ts` + `transport/channel-map.ts`：`pcIndexRetry` 声明与映射；`pcListCapabilities` 返回类型换 compat
+- `useProjectAssets.ts` / `ProjectPinPane.tsx`：读取类型 `PcCapabilitiesResponse` → `PcCapabilitiesCompat`
+- 新 `__tests__/admin-client-index-retry.test.ts`（4 tests）：compat 双形态（老 admin 缺 parsing 照常解析 / 新 admin 透传）、POST 形状（路径+projectId query+body `{}`）、非 failed 资产的 `pc_validation_error` 映射
+
+**批次 B · U5/U6 renderer + 测试 + i18n（a7355196）**
+- `AssetRow.tsx`：failed 行「重试索引」菜单项（`pc-asset-action-index-retry-{id}`）——平行于 rebuild 入口，置于其前（单文件补救是低成本路径，整库 rebuild 是兜底）；权限：`canIndexRetry`（上传者本人或管理员）可用，其余成员禁用态 `data-retry-blocked="true"` 示责（仿 S-05 rebuild 语义）；S-05 注释「never a per-file retry」措辞同步收窄
+- `ProjectFileLibrary.tsx`：`handleIndexRetry`——单资产直调、无范围确认（admin 设计 §3.5 明确非 rebuild_space）；成功 toast 按 `capabilities.parsing.expectedParsingSeconds` 报预算（「通常约 N 秒内完成」），parsing 缺失降级保守慢文案（「大文件解析可能需要几分钟」）；admin 在同一事务把 version 翻回 processing，故成功即 `refresh()` 徽章立取；`canIndexRetry={canManage || uploader===currentUserId}` 与 `parsing={capabilities?.parsing}` 透传
+- `AssetUploadDialog.tsx`（U6）：新 `parsing` prop + `AssetParsingHint` 两档格式说明——「可解析并纳入检索：…」/「仅存储、不纳入检索：…」（token 用 `Intl.ListFormat` 按语言连接）+ 解析预算行；空 token 表不渲染对应行；**parsing 缺失（老 admin）降级单行保守文案，不点名任何格式**（承诺无法验证的「pdf 可检索」不如不说）；`formatParsingTokens` 导出可测
+- i18n 八新键 × 七语言：`actions.indexRetry`、`actions.indexRetryNeedsUploaderOrManager`、`toast.indexRetryRequested`（含 `{{seconds}}`）、`toast.indexRetryRequestedSlow`、`upload.parsing.searchable/storeOnly/budget/fallback`
+- 测试：`ProjectFileLibrary.interaction.isolated.ts` +5（上传者可用且点击到线+refresh、非上传者非管理员禁用态、管理员可用、toast 报预算 45 秒、`pc_validation_error` 拒绝走映射 error toast；dropdown 用 inert mock 直点 menu item）；`AssetUploadDialog.isolated.ts` +2（两档渲染+预算、缺失降级零格式点名）
+
+### 6.2 检查与结果计数
+
+| 检查 | 结果 |
+|---|---|
+| typecheck：shared / server-core / electron | 各 0 错 |
+| 契约字节对齐（admin 导出脚本 `--check` 对客户端文件） | in sync |
+| i18n sorted / parity / coverage | 全绿；parity 3367 键 × 7 语言（+8） |
+| `packages/server-core/src/project-context/` 全套（7 文件） | 56 pass / 0 fail（含新 4） |
+| `project-context/__tests__/` 12 个 isolated 文件逐文件分进程 | 79 pass / 0 fail（+7） |
+| lint 定向（本次 9 个改动文件） | 0 error 0 warning |
+| lint electron 全量 | 6 error / 211 warning——**全部预存**（AdminLoginStep/PhoneAuthStep shadow、ProjectMembersPanel:857、useProjectTabSidebarCollapse rules-of-hooks、playground；均不在本次 diff 清单） |
+
+admin 侧 `tests/project-context.contract.test.ts` 的 `--check` 恢复绿说明：该测试硬编码 `CLIENT_CONTRACT_PATH` 指向 POO-196 worktree（干净树，契约仍为 poo196-contract-r2），属其它任务线不代动（约束：只动本任务树）；再生只落本树并已自验 in sync。admin 线把该路径切到本分支（或本分支进 main 后）即可恢复绿。
+
+### 6.3 剩余风险与边界
+
+- **capabilities parse 的 strict 语义**：compat 投影保留 strict——未来 admin 若再加新 capabilities 字段，老客户端会整块拒绝（前进式破坏）。这是 GENERATED 字节锁定的既定取舍；下一个契约版本再生时同样走 compat 投影扩展。
+- **U5 按钮权限是演示门**：`canIndexRetry` 按上传者/管理员显示，服务端权威裁决（`pc_forbidden`/`pc_validation_error` 都有映射文案）；角色在会话中途被降级的成员可能看到可点按钮但被 admin 拒绝。
+- **两档说明是静态展示**：parsing token 表渲染在弹层底部，不按文件扩展名动态标注「这个文件属于哪一档」（U6 原文只要求两档格式说明）；批量清单已有逐条 `binary_format` 排除理由覆盖。
+- **U5/U6 未真跑 Electron**：以 isolated 组件/传输测试为界；真实 admin + 真实 failed 资产的端到端（重试→processing→indexed）归 e2e 验收阶段。
+- **spec.md / RESOURCES.md 未提交**：按派发约束留在任务目录。
