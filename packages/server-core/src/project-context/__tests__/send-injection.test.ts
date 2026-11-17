@@ -175,7 +175,7 @@ describe('resolveSessionProjectContext — first-turn header convergence (POO-21
     const resolved = await resolveSessionProjectContext(makeDeps(FIRST_TURN_SESSION), SESSION_ID, undefined, WORKSPACE_ID, null, PROJECT_ID)
     expect(resolved).toBeDefined()
     expect(resolved?.modelContext).toBeDefined()
-    expect(resolved?.modelContext?.block).toContain('项目共享文件区：12 个文件，4 个已确认结论，2 个置顶')
+    expect(resolved?.modelContext?.block).toContain('项目文件库：12 个文件，4 个已确认结论，2 个置顶')
     expect(resolved?.modelContext?.block).toContain('置顶文件：决策记录.md (v3)、SOP.md (v1)')
     expect(resolved?.modelContext?.block).toContain('项目概况正文。')
     expect(calls.summary).toBe(1)
@@ -258,7 +258,7 @@ describe('resolveSessionProjectContext — pinned digest bounds (U7)', () => {
     installAdmin({ pinned: [] })
     const resolved = await resolveSessionProjectContext(makeDeps(FIRST_TURN_SESSION), SESSION_ID, undefined, WORKSPACE_ID, null, PROJECT_ID)
     const block = resolved?.modelContext?.block ?? ''
-    expect(block).toContain('项目共享文件区：12 个文件，4 个已确认结论')
+    expect(block).toContain('项目文件库：12 个文件，4 个已确认结论')
     expect(block).not.toContain('置顶文件：')
     expect(block).not.toContain('个置顶')
   })
@@ -273,7 +273,7 @@ describe('resolveSessionProjectContext — pinned digest bounds (U7)', () => {
     } as unknown as ProjectContextAdmin)
     const resolved = await resolveSessionProjectContext(makeDeps(FIRST_TURN_SESSION), SESSION_ID, undefined, WORKSPACE_ID, null, PROJECT_ID)
     const block = resolved?.modelContext?.block ?? ''
-    expect(block).toContain('项目共享文件区：12 个文件，4 个已确认结论')
+    expect(block).toContain('项目文件库：12 个文件，4 个已确认结论')
     expect(block).not.toContain('置顶文件：')
   })
 })
@@ -286,7 +286,7 @@ describe('buildProjectHeaderLines — pure assembly', () => {
       pinnedHasMore: false,
     })
     expect(lines).toEqual([
-      '项目共享文件区：12 个文件，4 个已确认结论，1 个置顶',
+      '项目文件库：12 个文件，4 个已确认结论，1 个置顶',
       '置顶文件：A.md (v2)',
       '项目概况正文。',
     ])
@@ -298,6 +298,6 @@ describe('buildProjectHeaderLines — pure assembly', () => {
       pinned: [],
       pinnedHasMore: false,
     })
-    expect(lines).toEqual(['项目共享文件区：12 个文件，4 个已确认结论'])
+    expect(lines).toEqual(['项目文件库：12 个文件，4 个已确认结论'])
   })
 })

@@ -120,19 +120,19 @@ describe('project_context handlers (facade null fails closed)', () => {
     const result = await handleProjectContextSearch(makeCtx(), { query: 'roadmap' });
     expect(result.isError).toBe(true);
     const text = (result.content[0] as { text: string }).text;
-    expect(text).toContain('当前会话不在项目共享范围内');
+    expect(text).toContain('当前会话不在项目文件库范围内');
   });
 
   it('read fails closed when the facade is absent', async () => {
     const result = await handleProjectContextRead(makeCtx(), { assetId: 'asset-1' });
     expect(result.isError).toBe(true);
-    expect((result.content[0] as { text: string }).text).toContain('当前会话不在项目共享范围内');
+    expect((result.content[0] as { text: string }).text).toContain('当前会话不在项目文件库范围内');
   });
 
   it('search fails closed when the factory returns null', async () => {
     const result = await handleProjectContextSearch(makeCtx(() => null), { query: 'roadmap' });
     expect(result.isError).toBe(true);
-    expect((result.content[0] as { text: string }).text).toContain('当前会话不在项目共享范围内');
+    expect((result.content[0] as { text: string }).text).toContain('当前会话不在项目文件库范围内');
   });
 
   it('rejects invalid arguments before invoking the facade', async () => {
@@ -192,7 +192,7 @@ describe('project_context handlers (facade output formatting)', () => {
     expect(result.isError).toBe(false);
     const text = (result.content[0] as { text: string }).text;
     expect(text).toContain('索引暂不可达，以下按名称与标签匹配');
-    expect(text).toContain('没有匹配的项目共享文件');
+    expect(text).toContain('没有匹配的项目文件');
   });
 
   it('read returns the content with its version', async () => {
@@ -282,7 +282,7 @@ describe('project_context_suggest (POO-215 U1 distillation hand-off)', () => {
   it('fails closed when the facade is absent', async () => {
     const result = await handleProjectContextSuggest(makeCtx(), { entries: [ENTRY] });
     expect(result.isError).toBe(true);
-    expect((result.content[0] as { text: string }).text).toContain('当前会话不在项目共享范围内');
+    expect((result.content[0] as { text: string }).text).toContain('当前会话不在项目文件库范围内');
   });
 
   it('rejects invalid arguments before invoking the facade', async () => {

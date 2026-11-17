@@ -715,7 +715,7 @@ export function buildProjectHeaderLines(input: {
     ? ''
     : input.pinnedHasMore ? `${input.pinned.length}+ 个置顶` : `${input.pinned.length} 个置顶`
   const lines = [
-    `项目共享文件区：${input.summary.assetCount} 个文件，${input.summary.confirmedCount} 个已确认结论${pinnedTotalText ? `，${pinnedTotalText}` : ''}`,
+    `项目文件库：${input.summary.assetCount} 个文件，${input.summary.confirmedCount} 个已确认结论${pinnedTotalText ? `，${pinnedTotalText}` : ''}`,
   ]
   if (input.pinned.length > 0) {
     const listing = input.pinned.map(entry => `${entry.name} (v${entry.version})`).join('、')

@@ -25,7 +25,7 @@ import {
   type ProjectContextSuggestion,
 } from '../project-context-types.ts';
 
-const PROJECT_CONTEXT_TOOLS_UNAVAILABLE = '当前会话不在项目共享范围内';
+const PROJECT_CONTEXT_TOOLS_UNAVAILABLE = '当前会话不在项目文件库范围内';
 
 /** One hit per line: 名称 (v版本) 标签 ｜ snippet ｜ assetId=… version=… */
 function formatHit(hit: ProjectContextSearchHit): string {
@@ -74,8 +74,8 @@ export async function handleProjectContextSearch(ctx: SessionToolContext, args: 
   }
   if (result.hits.length === 0) {
     lines.push(result.degraded
-      ? '没有匹配的项目共享文件'
-      : `没有匹配的项目共享文件（query: ${parsed.data.query}）`);
+      ? '没有匹配的项目文件'
+      : `没有匹配的项目文件（query: ${parsed.data.query}）`);
   } else {
     for (const hit of result.hits) {
       lines.push(formatHit(hit));
@@ -138,7 +138,7 @@ export async function handleProjectContextSuggest(ctx: SessionToolContext, args:
   try {
     const gate = await facade.suggest();
     if (!gate.ok) {
-      return errorResponse('当前会话不在项目共享范围内，无法发起沉淀建议');
+      return errorResponse('当前会话不在项目文件库范围内，无法发起沉淀建议');
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -154,7 +154,7 @@ export async function handleProjectContextSuggest(ctx: SessionToolContext, args:
   const envelope = {
     marker: PC_DISTILL_RESULT_MARKER,
     accepted: suggestions.length,
-    message: `已向用户展示 ${suggestions.length} 条沉淀建议，等待用户勾选确认；用户确认后才会写入项目共享文件区，请勿为相同内容重复建议。`,
+    message: `已向用户展示 ${suggestions.length} 条沉淀建议，等待用户勾选确认；用户确认后才会写入项目文件库，请勿为相同内容重复建议。`,
     suggestions,
   };
   // The envelope is the tool result verbatim: the renderer parses it by
