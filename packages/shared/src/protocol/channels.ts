@@ -440,6 +440,8 @@ export const RPC_CHANNELS = {
     GET_PREVIEW_URL: 'pc:getPreviewUrl',
     SEARCH_ASSETS: 'pc:searchAssets',
     REBUILD: 'pc:rebuild',
+    // POO-215 U5: single-asset index retry (admin index-retry endpoint).
+    INDEX_RETRY: 'pc:indexRetry',
     // POO-210 batch upload staging (LOCAL_ONLY, transport-layer only — no
     // PC wire contract change): the zip unpack/folder scan that builds the
     // entry list, and the cleanup for the staging directory it writes.

@@ -14,6 +14,9 @@ export { SessionViewer, type SessionViewerProps, type SessionViewerMode } from '
 export { UserMessageBubble, type UserMessageBubbleProps } from './UserMessageBubble'
 export { SystemMessage, type SystemMessageProps, type SystemMessageType } from './SystemMessage'
 
+// POO-215 U1: distillation checklist card (renders project_context_suggest results)
+export { DistillSuggestionCard, parseDistillSuggestions, isDistillSuggestToolName, type DistillSuggestion, type DistillEntryResult } from './DistillSuggestionCard'
+
 // Attachment helpers
 export { FileTypeIcon, getFileTypeLabel, type FileTypeIconProps } from './attachment-helpers'
 

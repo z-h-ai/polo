@@ -385,6 +385,8 @@ export const CHANNEL_MAP = {
   pcGetPreviewUrl: invokeCoded(RPC_CHANNELS.projectContext.GET_PREVIEW_URL),
   pcSearchAssets: invokeCoded(RPC_CHANNELS.projectContext.SEARCH_ASSETS),
   pcRebuild: invokeCoded(RPC_CHANNELS.projectContext.REBUILD),
+  // POO-215 U5: single-asset index retry.
+  pcIndexRetry: invokeCoded(RPC_CHANNELS.projectContext.INDEX_RETRY),
 
   // POO-210 batch upload staging. Transport-layer only — the batch never
   // touches the admin contract; these build the LOCAL entry list the dialog

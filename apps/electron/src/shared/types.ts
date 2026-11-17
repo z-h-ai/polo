@@ -1472,7 +1472,8 @@ export interface ElectronAPI {
   // Enterprise Project Context (POO-196). pc:uploadFile is the single upload
   // RPC (renderer passes a local file path, never a transfer URL);
   // pc:downloadAsset streams to targetPath and answers with the saved path.
-  pcListCapabilities(input: import('@polo-ai/shared/protocol').PcListCapabilitiesInput): Promise<import('@polo-ai/shared/protocol').PcCapabilitiesResponse>
+  // pcListCapabilities (moved to the U5/U6 block below) answers through the
+  // POO-215 compat projection.
   pcGetSummary(input: import('@polo-ai/shared/protocol').PcGetSummaryInput): Promise<import('@polo-ai/shared/protocol').PcSummaryResponse>
   pcListAssets(input: import('@polo-ai/shared/protocol').PcListAssetsInput): Promise<import('@polo-ai/shared/protocol').PcAssetListResponse>
   pcGetAsset(input: import('@polo-ai/shared/protocol').PcGetAssetInput): Promise<import('@polo-ai/shared/protocol').PcMutationResponse>
@@ -1487,6 +1488,12 @@ export interface ElectronAPI {
   pcGetPreviewUrl(input: import('@polo-ai/shared/protocol').PcGetPreviewUrlIpcInput): Promise<import('@polo-ai/shared/protocol').PcPreviewResponse>
   pcSearchAssets(input: import('@polo-ai/shared/protocol').PcSearchAssetsInput): Promise<import('@polo-ai/shared/protocol').PcSearchResponse>
   pcRebuild(input: import('@polo-ai/shared/protocol').PcRebuildInput): Promise<import('@polo-ai/shared/protocol').PcRebuildResponse>
+  // POO-215 U5: single-asset index retry (admin index-retry endpoint; the
+  // response is the rebuild `{ jobId }` shape). POO-215 U6: capabilities
+  // answers through the COMPAT projection — `parsing` is absent on an older
+  // admin and the upload UI degrades to static copy.
+  pcIndexRetry(input: import('@polo-ai/shared/protocol').PcIndexRetryInput): Promise<import('@polo-ai/shared/protocol').PcRebuildResponse>
+  pcListCapabilities(input: import('@polo-ai/shared/protocol').PcListCapabilitiesInput): Promise<import('@polo-ai/shared/protocol').PcCapabilitiesCompat>
 
   // POO-210 batch upload staging (LOCAL_ONLY): builds the batch entry list
   // from a zip (unpacking included entries into a private staging dir) or a

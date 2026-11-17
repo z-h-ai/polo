@@ -158,15 +158,19 @@ export type {
   GoalUpdateReport,
 } from './goal-types.ts';
 
-// Project context protocol (project_context_search/read) — POO-196
+// Project context protocol (project_context_search/read/suggest) — POO-196/POO-215
 export {
   ProjectContextSearchArgsSchema,
   ProjectContextReadArgsSchema,
+  ProjectContextSuggestArgsSchema,
+  PC_DISTILL_RESULT_MARKER,
 } from './project-context-types.ts';
 
 export type {
   ProjectContextSearchHit,
   ProjectContextFacade,
+  ProjectContextSuggestArgs,
+  ProjectContextSuggestion,
 } from './project-context-types.ts';
 
 // Session MCP server spawn spec (dependency-free leaf — see spawn-spec.ts)
@@ -232,9 +236,10 @@ export {
   handleRequestUserInput,
   // Goal Update (POO-134 structured goal reporting)
   handleGoalUpdate,
-  // Project Context (POO-196 shared project file area)
+  // Project Context (POO-196 shared project file area; POO-215 distillation)
   handleProjectContextSearch,
   handleProjectContextRead,
+  handleProjectContextSuggest,
   // Update Preferences
   handleUpdatePreferences,
   // Transform Data

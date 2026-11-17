@@ -151,5 +151,24 @@ export function createProjectContextToolFacade(input: ProjectContextToolFacadeIn
         return { ok: false, error: stableReadErrorCode(error) }
       }
     },
+
+    // POO-215 U1: the suggestion gate performs NO admin call and NO write —
+    // the entries travel to the renderer via the tool_result for the user to
+    // confirm (Q5). The gate re-reads the session's CURRENT bindings so a
+    // mid-turn rebinding or a lost fence answers not-okay instead of raising
+    // a suggestion card for a session that left the project.
+    async suggest(): Promise<{ ok: true } | { ok: false; error: string }> {
+      const current = deps.sessionManager
+        .getSessions()
+        .find(candidate => candidate.id === sessionId) as ProjectBoundSessionRecord | undefined
+      if (!isProjectSessionAuthorizedNow({
+        workspaceId,
+        sessionProductSpaceId: current?.productSpaceId ?? null,
+        sessionProjectId: current?.projectId ?? null,
+      })) {
+        return { ok: false, error: 'not_authorized' }
+      }
+      return { ok: true }
+    },
   }
 }

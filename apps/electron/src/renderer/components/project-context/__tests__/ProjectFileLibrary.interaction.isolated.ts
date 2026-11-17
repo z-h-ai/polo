@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
 import { I18nextProvider } from 'react-i18next'
+import type { ReactNode } from 'react'
 import { i18n, setupI18n } from '@polo-ai/shared/i18n'
 import type { PcAssetDto, PcTag } from '@polo-ai/shared/protocol'
 
@@ -48,6 +49,20 @@ mock.module('@polo-ai/ui', () => ({
   JSONPreviewOverlay: () => null,
   PDFPreviewOverlay: () => null,
   Markdown: () => null,
+}))
+// POO-215 U5: the row action menu renders through Radix dropdowns, which
+// need portals/pointer events happy-dom does not exercise well — inert
+// stand-ins keep every item in the DOM so the menu can be asserted and
+// clicked directly (same trick as ProductSpaceSwitcher.interaction).
+mock.module('@/components/ui/dropdown-menu', () => ({
+  DropdownMenu: ({ children }: { children?: ReactNode }) => createElement('div', null, children),
+  DropdownMenuTrigger: ({ children, ...props }: { children?: ReactNode } & Record<string, unknown>) => createElement('div', props, children),
+}))
+mock.module('@/components/ui/styled-dropdown', () => ({
+  StyledDropdownMenuContent: ({ children, ...props }: { children?: ReactNode } & Record<string, unknown>) => createElement('div', props, children),
+  StyledDropdownMenuItem: ({ children, ...props }: { children?: ReactNode } & Record<string, unknown>) =>
+    createElement('button', { type: 'button', ...props }, children),
+  StyledDropdownMenuSeparator: () => createElement('hr'),
 }))
 
 const { cleanup, fireEvent, render, screen, waitFor, act } = await import('@testing-library/react')
@@ -99,6 +114,8 @@ interface Harness {
   listCalls: Array<Record<string, unknown>>
   restoreCalls: Array<Record<string, unknown>>
   trashFailuresLeft: number
+  indexRetryCalls: Array<Record<string, unknown>>
+  indexRetryFailuresLeft: number
 }
 
 function makeHarness(overrides: Partial<Harness> = {}): Harness {
@@ -109,6 +126,8 @@ function makeHarness(overrides: Partial<Harness> = {}): Harness {
     listCalls: [],
     restoreCalls: [],
     trashFailuresLeft: 0,
+    indexRetryCalls: [],
+    indexRetryFailuresLeft: 0,
     ...overrides,
   }
   Object.defineProperty(window, 'electronAPI', {
@@ -131,18 +150,26 @@ function makeHarness(overrides: Partial<Harness> = {}): Harness {
         const row = harness.trashAssets.find((candidate) => candidate.id === input.assetId)!
         return { asset: { ...row, status: 'active' } }
       },
+      pcIndexRetry: async (input: Record<string, unknown>) => {
+        harness.indexRetryCalls.push(input)
+        if (harness.indexRetryFailuresLeft > 0) {
+          harness.indexRetryFailuresLeft -= 1
+          throw Object.assign(new Error('not retryable'), { code: 'pc_validation_error' })
+        }
+        return { jobId: `job-${harness.indexRetryCalls.length}` }
+      },
     },
   })
   return harness
 }
 
-function renderLibrary(harness: Harness) {
+function renderLibrary(harness: Harness, currentUserId: string | null = 'user-a') {
   return render(createElement(
     I18nextProvider,
     { i18n },
     createElement(ProjectFileLibrary as unknown as (props: Record<string, unknown>) => React.ReactElement, {
       scope: SCOPE,
-      currentUserId: 'user-a',
+      currentUserId,
     }),
   ))
 }
@@ -306,5 +333,93 @@ describe('ProjectFileLibrary interaction (POO-196)', () => {
     expect(chip.textContent).toBe('Risk register')
     fireEvent.click(chip)
     await waitFor(() => expect(harness.listCalls.at(-1)).toMatchObject({ tag: 'risk-register' }))
+  })
+})
+
+describe('ProjectFileLibrary index-retry interaction (POO-215 U5)', () => {
+  const failedRow = (id: string, uploader: string): PcAssetDto =>
+    asset({ id, uploaderUserId: uploader, current: { version: 1, sizeBytes: 10, mime: 'text/html', checksumSha256: null, createdAt: '', createdById: uploader, processing: 'failed', confirmedAt: null, confirmedByUserId: null } as PcAssetDto['current'] })
+
+  it('the uploader sees an enabled retry entry on a failed row only; the click reaches the wire with scope + assetId and re-syncs', async () => {
+    const harness = makeHarness({
+      activeAssets: [asset({ id: 'a-1' }), failedRow('a-2', 'user-a')],
+    })
+    renderLibrary(harness)
+    await screen.findByTestId('pc-asset-row-a-2')
+
+    // Only the FAILED row carries the entry — a healthy row never offers it.
+    const entry = screen.getByTestId('pc-asset-action-index-retry-a-2') as HTMLButtonElement
+    expect(entry.disabled).toBe(false)
+    expect(entry.getAttribute('data-retry-blocked')).toBeNull()
+    expect(screen.queryByTestId('pc-asset-action-index-retry-a-1')).toBeNull()
+
+    const baseCalls = harness.listCalls.length
+    fireEvent.click(entry)
+    await waitFor(() => expect(harness.indexRetryCalls).toHaveLength(1))
+    expect(harness.indexRetryCalls[0]).toMatchObject({
+      workspaceId: 'ws-pc',
+      productSpaceId: 'ps-1',
+      assetId: 'a-2',
+    })
+    // The accepted retry re-syncs the library so the badge flips to processing.
+    await waitFor(() => expect(harness.listCalls.length).toBeGreaterThan(baseCalls))
+    // No advertised parse budget (old-admin shape) → the conservative slow copy.
+    expect(toastCalls.some((entry) => entry.type === 'success' && entry.message.includes('a few minutes'))).toBe(true)
+  })
+
+  it('a member who is neither the uploader nor a manager sees the blocked entry naming who must act', async () => {
+    const harness = makeHarness({
+      activeAssets: [failedRow('a-2', 'user-b')],
+    })
+    renderLibrary(harness)
+    await screen.findByTestId('pc-asset-row-a-2')
+
+    const entry = screen.getByTestId('pc-asset-action-index-retry-a-2') as HTMLButtonElement
+    expect(entry.disabled).toBe(true)
+    expect(entry.getAttribute('data-retry-blocked')).toBe('true')
+    expect(harness.indexRetryCalls).toHaveLength(0)
+  })
+
+  it('a manager sees an enabled entry on a failed row they did not upload', async () => {
+    const harness = makeHarness({
+      capabilities: { featureEnabled: true, role: 'manager', canManage: true, canShare: true, library: { status: 'ready' }, limits: { maxUploadBytes: 100, downloadUrlTtlSeconds: 60 } },
+      activeAssets: [failedRow('a-2', 'user-b')],
+    })
+    renderLibrary(harness)
+    await screen.findByTestId('pc-asset-row-a-2')
+
+    const entry = screen.getByTestId('pc-asset-action-index-retry-a-2') as HTMLButtonElement
+    expect(entry.disabled).toBe(false)
+    fireEvent.click(entry)
+    await waitFor(() => expect(harness.indexRetryCalls).toHaveLength(1))
+    expect(harness.indexRetryCalls[0]).toMatchObject({ assetId: 'a-2' })
+  })
+
+  it('the processing toast quotes the advertised parse budget when capabilities carry the parsing block', async () => {
+    const harness = makeHarness({
+      capabilities: { featureEnabled: true, role: 'member', canManage: false, canShare: true, library: { status: 'ready' }, limits: { maxUploadBytes: 100, downloadUrlTtlSeconds: 60 }, parsing: { searchable: ['pdf'], storeOnly: ['zip'], expectedParsingSeconds: 45 } },
+      activeAssets: [failedRow('a-2', 'user-a')],
+    })
+    renderLibrary(harness)
+    await screen.findByTestId('pc-asset-row-a-2')
+
+    fireEvent.click(screen.getByTestId('pc-asset-action-index-retry-a-2'))
+    await waitFor(() => expect(harness.indexRetryCalls).toHaveLength(1))
+    const success = toastCalls.find((entry) => entry.type === 'success')
+    expect(success?.message).toContain('45')
+  })
+
+  it('a refused retry (non-failed asset) surfaces the mapped pc_* copy instead of a success toast', async () => {
+    const harness = makeHarness({
+      activeAssets: [failedRow('a-2', 'user-a')],
+      indexRetryFailuresLeft: 1,
+    })
+    renderLibrary(harness)
+    await screen.findByTestId('pc-asset-row-a-2')
+
+    fireEvent.click(screen.getByTestId('pc-asset-action-index-retry-a-2'))
+    await waitFor(() => expect(harness.indexRetryCalls).toHaveLength(1))
+    await waitFor(() => expect(toastCalls.some((entry) => entry.type === 'error')).toBe(true))
+    expect(toastCalls.some((entry) => entry.type === 'success')).toBe(false)
   })
 })

@@ -7,6 +7,7 @@ import type {
   PcStagedZipBatchResponse,
   ProjectAssetReference,
 } from '@polo-ai/shared/protocol'
+import type { PcSummaryResponse } from '@polo-ai/shared/admin/project-context-contract'
 import {
   PcCreateAssetInputSchema,
   PcCreateUploadInputSchema,
@@ -71,6 +72,13 @@ const PC_REF_SECTION_BYTES = 4_000
 /** Explicit @ references accepted per send — a bounded input is a bounded
  * resolution. */
 const PC_REFS_PER_SEND_MAX = 10
+/**
+ * POO-215 U7: the first-turn header lists at most this many pinned assets by
+ * name. The list query fetches one extra row so 「还有更多置顶」 is derivable
+ * from the page itself (no admin count endpoint exists), and an overflow
+ * degrades to a count line instead of an unbounded header.
+ */
+const PC_HEADER_PINNED_LIST_MAX = 8
 
 export function pcError(code: string, message?: string): Error {
   return Object.assign(new Error(message ?? code), { code })
@@ -602,6 +610,29 @@ export async function pcRebuild(
   }
 }
 
+/**
+ * POO-215 U5: retry the index pipeline for ONE failed asset. Same gate set
+ * as the project-wide rebuild — the admin side owns the per-asset state
+ * check (a non-`failed` asset refuses with the stable `pc_validation_error`).
+ */
+export async function pcIndexRetry(
+  deps: HandlerDeps,
+  ctx: RequestContext,
+  input: { workspaceId: string; productSpaceId: string; projectId: string; assetId: string },
+): Promise<unknown> {
+  const scope = await requireProjectContextScope(ctx, input.workspaceId, deps)
+  assertRequestedSpace(scope, input.productSpaceId)
+  assertRequestedProject(input.projectId)
+  assertWritable(scope)
+  try {
+    const result = await theAdmin().indexRetry(input.productSpaceId, input.projectId, input.assetId)
+    assertScopeCurrent(scope)
+    return result
+  } catch (error) {
+    throw mapAdminFailure(error)
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* Send path: @ reference resolution + bounded project header          */
 /* ------------------------------------------------------------------ */
@@ -667,14 +698,64 @@ function buildProjectModelContextBlock(input: {
 }
 
 /**
- * The send-path resolution (adjudication D8/D7 + R8b):
+ * POO-215 U7: the first-turn project header content — asset statistics +
+ * confirmed/pinned digest + the admin overview, then one line pointing the
+ * model at the on-demand tools. Project instructions deliberately do NOT ride
+ * here: POO-205 C7a already injects `<project_instructions>` into the system
+ * prompt every turn (the correct channel for standing constraints), and a
+ * second copy in the send-path block would be redundant token spend with a
+ * different clamp/neutralization behavior.
+ */
+export function buildProjectHeaderLines(input: {
+  summary: PcSummaryResponse
+  pinned: Array<{ name: string; version: number }>
+  pinnedHasMore: boolean
+}): string[] {
+  const pinnedTotalText = input.pinned.length === 0
+    ? ''
+    : input.pinnedHasMore ? `${input.pinned.length}+ 个置顶` : `${input.pinned.length} 个置顶`
+  const lines = [
+    `项目文件库：${input.summary.assetCount} 个文件，${input.summary.confirmedCount} 个已确认结论${pinnedTotalText ? `，${pinnedTotalText}` : ''}`,
+  ]
+  if (input.pinned.length > 0) {
+    const listing = input.pinned.map(entry => `${entry.name} (v${entry.version})`).join('、')
+    lines.push(`置顶文件：${listing}${input.pinnedHasMore ? '（未列全）' : ''}`)
+  }
+  if (input.summary.overview.trim().length > 0) {
+    lines.push(input.summary.overview)
+  }
+  // Tool on-demand guidance rides the reminder wrapper (SessionManager), not
+  // the header — it must also reach later, header-less reference-only turns.
+  return lines
+}
+
+/** Was the session's first user message already persisted? A session whose
+ * JSONL carries any user turn — in memory OR in the lazy header preview —
+ * has had its first-turn injection, so the header must not ride again. */
+function hasEarlierUserTurn(session: { messages?: Array<{ role: string }>; preview?: string } | null): boolean {
+  if (!session) return false
+  if ((session.messages ?? []).some(message => message.role === 'user')) return true
+  // Lazy-loaded sessions keep a JSONL-header signature of the first user
+  // message even when the body array is still empty — trust it as a
+  // conservative "not first" signal (a false positive only skips a header;
+  // a false negative would re-inject every turn, the old behavior).
+  return typeof session.preview === 'string' && session.preview.length > 0
+}
+
+/**
+ * The send-path resolution (adjudication D8/D7 + R8b; POO-215 Q7/U7):
  *
  * - a session bound to the committed project gets a bounded project header
- *   (overview + confirmed count + recent files) injected once per send;
+ *   injected ONCE — on the send that carries the session's FIRST user
+ *   message. Later sends inject no header at all: the model falls back to
+ *   the on-demand `project_context_search`/`project_context_read` tools.
+ *   A failed/timed-out first header is not retried (one-shot semantics; the
+ *   tools remain the recovery path);
  * - explicit @ references are resolved ONE BY ONE against the admin read
  *   path — every reference carries its outcome (`ok` / `missing` /
  *   `stale` / `failed`) in the persisted snapshot, so the renderer can tell
- *   the user exactly which reference did not make it (never a silent drop);
+ *   the user exactly which reference did not make it (never a silent drop).
+ *   This per-send resolution is UNCHANGED by the first-turn convergence;
  * - the whole resolution is raced against one wall clock and NEVER blocks a
  *   send longer than its budget: on timeout the references still persist
  *   (marked per outcome) and the header is skipped.
@@ -724,14 +805,41 @@ export async function resolveSessionProjectContext(
     const deadline = Date.now() + sendResolveTimeoutMs
     const admin = theAdmin()
 
-    // The bounded header (one admin call, skipped on timeout/failure).
-    const headerPromise = (async (): Promise<string[]> => {
-      const summary = await admin.summary(sessionSpaceId as string, projectId)
-      return [
-        `项目：${summary.assetCount} 个共享文件，其中 ${summary.confirmedCount} 个已确认结论`,
-        summary.overview,
-      ]
-    })()
+    // POO-215 Q7: the header is a FIRST-USER-MESSAGE injection. Reads the
+    // session's message history (ensureMessagesLoaded makes lazy sessions
+    // authoritative here) — after this send persists, the header never rides
+    // again. The admin calls below are therefore skipped entirely on every
+    // later send of the session.
+    const firstTurnSession = await deps.sessionManager.getSession(sessionId).catch(() => null)
+    // Unreadable session state = header SKIPPED (fail-closed): guessing
+    // "first turn" here could re-flood an old session with its header.
+    const isFirstProjectHeaderTurn = firstTurnSession !== null && !hasEarlierUserTurn(firstTurnSession)
+
+    // The bounded header (first turn only; skipped on timeout/failure and
+    // never retried). The pinned digest is an enhancement: its own failure
+    // degrades to statistics-only, it never sinks the header.
+    const headerPromise: Promise<string[]> = isFirstProjectHeaderTurn
+      ? (async (): Promise<string[]> => {
+        const summary = await admin.summary(sessionSpaceId as string, projectId)
+        let pinned: Array<{ name: string; version: number }> = []
+        let pinnedHasMore = false
+        try {
+          const page = await admin.listAssets(sessionSpaceId as string, projectId, {
+            view: 'active',
+            pinned: 'true',
+            limit: PC_HEADER_PINNED_LIST_MAX + 1,
+          })
+          pinnedHasMore = page.assets.length > PC_HEADER_PINNED_LIST_MAX || typeof page.nextCursor === 'string'
+          pinned = page.assets.slice(0, PC_HEADER_PINNED_LIST_MAX).map(asset => ({
+            name: asset.name,
+            version: asset.current.version,
+          }))
+        } catch (error) {
+          deps.platform.logger?.warn(`PC_SEND_HEADER_PINNED: digest skipped: ${error instanceof Error ? error.message : String(error)}`)
+        }
+        return buildProjectHeaderLines({ summary, pinned, pinnedHasMore })
+      })()
+      : Promise.resolve([])
 
     // The explicit references, one authorized read each.
     const referencePromise = (async (): Promise<Array<ProjectAssetReference & { content?: string }>> => {

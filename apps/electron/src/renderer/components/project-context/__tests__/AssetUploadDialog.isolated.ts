@@ -68,7 +68,7 @@ function makeHarness(): Harness {
   return harness
 }
 
-function renderDialog(onSubmit?: (input: AssetUploadInput) => Promise<void>) {
+function renderDialog(onSubmit?: (input: AssetUploadInput) => Promise<void>, parsing?: Record<string, unknown>) {
   const harness = makeHarness()
   const submissions = harness.submissions
   const submit = onSubmit ?? (async (input: AssetUploadInput) => {
@@ -84,6 +84,7 @@ function renderDialog(onSubmit?: (input: AssetUploadInput) => Promise<void>) {
       maxUploadBytes: MAX_BYTES,
       onClose: () => {},
       onSubmit: submit,
+      parsing,
     }),
   ))
   return harness
@@ -171,5 +172,34 @@ describe('AssetUploadDialog (POO-196)', () => {
     await waitFor(() => expect(harness.submissions).toHaveLength(1))
     expect(harness.submissions[0]!.mime).toBe('text/markdown')
     expect(screen.queryByTestId('pc-upload-error')).toBeNull()
+  })
+})
+
+describe('AssetUploadDialog parsing hint (POO-215 U6)', () => {
+  it('the capabilities parsing block renders both format tiers and the parse budget', () => {
+    renderDialog(undefined, { searchable: ['pdf', 'docx'], storeOnly: ['zip'], expectedParsingSeconds: 45 })
+
+    const hint = screen.getByTestId('pc-upload-parsing-hint')
+    const searchable = screen.getByTestId('pc-upload-parsing-searchable')
+    const storeOnly = screen.getByTestId('pc-upload-parsing-store-only')
+    const budget = screen.getByTestId('pc-upload-parsing-budget')
+    expect(searchable.textContent).toContain('pdf')
+    expect(searchable.textContent).toContain('docx')
+    expect(storeOnly.textContent).toContain('zip')
+    // The budget line quotes the advertised seconds — the same number the
+    // retry toast quotes.
+    expect(budget.textContent).toContain('45')
+    expect(hint.textContent).toContain('45')
+  })
+
+  it('an absent parsing block (old admin) degrades to the static conservative copy naming no format', () => {
+    renderDialog()
+
+    const hint = screen.getByTestId('pc-upload-parsing-hint')
+    expect(hint.textContent).toContain('Common document formats')
+    // No tier lines: we must not name formats the admin never advertised.
+    expect(screen.queryByTestId('pc-upload-parsing-searchable')).toBeNull()
+    expect(screen.queryByTestId('pc-upload-parsing-store-only')).toBeNull()
+    expect(screen.queryByTestId('pc-upload-parsing-budget')).toBeNull()
   })
 })

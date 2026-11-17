@@ -19,6 +19,7 @@ import {
   pcGetPreviewUrl,
   pcSearchAssets,
   pcRebuild,
+  pcIndexRetry,
   pcStageZipBatch,
   pcScanFolder,
   pcStageCleanup,
@@ -217,6 +218,12 @@ export function registerProjectContextHandlers(
   server.handle(RPC_CHANNELS.projectContext.REBUILD, async (ctx: RequestContext, rawInput: unknown) => {
     const input = parseOrThrow(WorkspaceScopeSchema, rawInput)
     return pcRebuild(deps, ctx, input)
+  })
+
+  // POO-215 U5: single-asset index retry (admin index-retry endpoint).
+  server.handle(RPC_CHANNELS.projectContext.INDEX_RETRY, async (ctx: RequestContext, rawInput: unknown) => {
+    const input = parseOrThrow(AssetIdSchema, rawInput)
+    return pcIndexRetry(deps, ctx, input)
   })
 
   server.handle(RPC_CHANNELS.projectContext.STAGE_ZIP_BATCH, async (ctx: RequestContext, rawInput: unknown) => {

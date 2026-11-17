@@ -39,6 +39,7 @@ import { ProjectContextTabs, type ProjectContextTab } from '@/components/project
 import { ProjectFileLibrary } from '@/components/project-context/ProjectFileLibrary'
 import { ProjectPinPane } from '@/components/project-context/ProjectPinPane'
 import { ShareToProjectDialog, type ShareToProjectTarget } from '@/components/project-context/ShareToProjectDialog'
+import { useDistillUpload } from '@/components/project-context/useDistillUpload'
 import { ProjectMembersEntryLabel, ProjectMembersPanel } from '@/components/project-context/ProjectMembersPanel'
 import { useProjectMembersPanelHost } from '@/components/project-context/useProjectMembersPanelHost'
 import { useCollaborationRoster } from '@/components/project-context/useCollaborationRoster'
@@ -857,6 +858,12 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     setRenameDialogOpen(false)
   }, [sessionId, renameName, displayTitle, onRenameSession])
 
+  // POO-215 U1/U2: the distillation checklist card is pure UI — the deposit
+  // round-trip (storeAttachment → upload → confirm) lives here. Non-project
+  // sessions get an undefined handler so the card renders inert instead of
+  // promising a deposit it cannot make.
+  const distillUpload = useDistillUpload({ sessionId, scope: projectScope, sessionTitle: displayTitle })
+
   // S-01: staging a share snapshots {text, attachments, sessionTitle} at
   // share-click time instead of keeping the live message. ChatPage re-renders
   // on session streaming and metadata updates; a target rebuilt per render
@@ -1242,6 +1249,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                   projectComposer={showProjectTabs}
                   projectShareEnabled={showProjectTabs}
                   onShareToProject={handleShareToProject}
+                  onDistillConfirm={showProjectTabs ? distillUpload.confirm : undefined}
                 />
               </div>
               {showProjectTabs && projectScope && (
@@ -1371,6 +1379,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
               projectComposer={showProjectTabs}
               projectShareEnabled={showProjectTabs}
               onShareToProject={handleShareToProject}
+              onDistillConfirm={showProjectTabs ? distillUpload.confirm : undefined}
             />
           </div>
           {showProjectTabs && projectScope && (

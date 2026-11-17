@@ -9,7 +9,6 @@ import { AdminClient, AdminError } from '@polo-ai/shared/admin'
 import { getAdminUrl } from '@polo-ai/shared/config'
 import { getCredentialManager, type CredentialManager } from '@polo-ai/shared/credentials'
 import type {
-  PcCapabilitiesResponse,
   PcCompleteUploadResponse,
   PcCreateAssetInput,
   PcCreateUploadInput,
@@ -25,6 +24,10 @@ import type {
   PcUpdateAssetInput,
   PcUploadGrantResponse,
 } from '@polo-ai/shared/admin/project-context-contract'
+// POO-215 U6: the compat projection lives at the RPC boundary layer, not in
+// the GENERATED contract (which keeps `parsing` required to mirror the new
+// admin verbatim).
+import type { PcCapabilitiesCompat } from '@polo-ai/shared/protocol'
 
 /**
  * The project-context admin adapter (adjudication D3.4).
@@ -50,7 +53,9 @@ const PC_REQUEST_TIMEOUT_MS = 15_000
  * project ⊆ organization ⊕ membership.
  */
 export interface ProjectContextAdmin {
-  capabilities(productSpaceId: string, projectId: string): Promise<PcCapabilitiesResponse>
+  capabilities(productSpaceId: string, projectId: string): Promise<PcCapabilitiesCompat>
+  /** POO-215 U5: re-queue the index pipeline for ONE failed asset. */
+  indexRetry(productSpaceId: string, projectId: string, assetId: string): Promise<{ jobId: string }>
   summary(productSpaceId: string, projectId: string): Promise<PcSummaryResponse>
   listAssets(productSpaceId: string, projectId: string, query: {
     view?: string
@@ -208,6 +213,9 @@ export function getProjectContextAdmin(): ProjectContextAdmin {
     rebuild: (productSpaceId, projectId) =>
       withAdmin((client, token) =>
         client.rebuildProjectContext(token, productSpaceId, projectId)),
+    indexRetry: (productSpaceId, projectId, assetId) =>
+      withAdmin((client, token) =>
+        client.retryProjectContextIndex(token, productSpaceId, projectId, assetId)),
   }
 }
 

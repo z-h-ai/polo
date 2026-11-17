@@ -1,6 +1,6 @@
 // GENERATED FILE — do not edit by hand.
 // Source of truth: polo-admin `src/lib/project-context/contracts.ts`.
-// Contract: poo196-contract-r2 · source sha256: 6585ba04d93356a92711e46c810bbda4b0bdead1ee5f716d24ffc2ac1df255dd
+// Contract: poo215-contract-r1 · source sha256: 66f5c056551130ebdc4a1fa2509afa28360071c018c403ecad694b9e63749af2
 // Regenerate: `tsx scripts/export-project-context-contract.ts <this-file>` (polo-admin repo);
 // `--check` verifies no drift between the two repos.
 import { z } from 'zod'
@@ -32,8 +32,11 @@ import { z } from 'zod'
  * index library is a rebuildable projection.
  */
 
-/** Bumped with every wire-visible change; the client artifact records it. */
-export const PC_CONTRACT_VERSION = "poo196-contract-r2";
+/** Bumped with every wire-visible change; the client artifact records it.
+ * poo215-contract-r1 (POO-215 candidate ①): capabilities gained the `parsing`
+ * two-tier format hint; `unsupported` narrowed to "the engine cannot parse it
+ * either" (comment-only). Evolution rule unchanged: append, never rename. */
+export const PC_CONTRACT_VERSION = "poo215-contract-r1";
 
 /**
  * The error codes this surface may put on the wire. The client's i18n and
@@ -76,9 +79,13 @@ export type PcRole = (typeof PC_ROLES)[number];
 export const PC_ASSET_STATUSES = ["active", "trashed"] as const;
 export type PcAssetStatus = (typeof PC_ASSET_STATUSES)[number];
 
-/** Content-processing state of one version. `unsupported` = stored and
- * downloadable, never full-text searchable (binary/large); `failed` keeps the
- * original downloadable and a retry path via rebuild. */
+/** Content-processing state of one version. POO-215 semantic narrowing —
+ * `unsupported` = stored and downloadable, never full-text searchable, and
+ * the parse engine cannot handle the format either (no engine upgrade will
+ * index it); `failed` = an engine-parsed import that did not complete — the
+ * original stays downloadable and the single-asset index-retry endpoint
+ * re-queues it (no percent progress exists; `processing` may last minutes
+ * for large documents). */
 export const PC_PROCESSING_STATES = ["processing", "indexed", "failed", "unsupported"] as const;
 export type PcProcessingState = (typeof PC_PROCESSING_STATES)[number];
 
@@ -222,6 +229,20 @@ export const PcCapabilitiesResponseSchema = z
       .object({
         maxUploadBytes: z.number().int().positive(),
         downloadUrlTtlSeconds: z.number().int().positive(),
+      })
+      .strict(),
+    /** POO-215 (U6): the two-tier upload expectation, authored by the
+     * server so the client never hard-codes what is searchable. Tokens are
+     * stable format ids; display names come from the client i18n. */
+    parsing: z
+      .object({
+        /** Formats the pipeline makes full-text searchable. */
+        searchable: z.array(z.string().min(1).max(32)).max(64),
+        /** Formats stored and downloadable but never searchable. */
+        storeOnly: z.array(z.string().min(1).max(32)).max(64),
+        /** Bounded expectation for engine-parsed imports (seconds); no
+         * percent progress exists, clients phrase it as "may take minutes". */
+        expectedParsingSeconds: z.number().int().positive(),
       })
       .strict(),
   })
