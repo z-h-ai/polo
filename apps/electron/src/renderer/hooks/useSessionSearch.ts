@@ -119,18 +119,7 @@ function groupSessionsByDate(sessions: SessionMeta[]): DateGroup[] {
     }))
 }
 
-/** Group key for pinned sessions when the list renders the top pinned group. */
-export const PINNED_GROUP_KEY = 'pinned'
-
-function getCollapseGroupKey(
-  item: SessionMeta,
-  groupingMode?: 'date' | 'status' | 'unread',
-  pinnedAsGroup = false,
-): string {
-  // Pinned sessions ride as the topmost group regardless of grouping mode —
-  // unless the whole view is the pinned ("已置顶") filter or search, where a
-  // pinned split would just re-count the same rows.
-  if (pinnedAsGroup && item.isFlagged === true) return PINNED_GROUP_KEY
+function getCollapseGroupKey(item: SessionMeta, groupingMode?: 'date' | 'status' | 'unread'): string {
   if (groupingMode === 'status') return `status-${getSessionStatus(item)}`
   if (groupingMode === 'unread') return item.hasUnread ? 'unread-yes' : 'unread-no'
   return startOfDay(new Date(item.lastMessageAt || 0)).toISOString()
@@ -147,36 +136,24 @@ export function computeCollapsedPagination(
   displayLimit: number,
   collapsedGroups?: Set<string>,
   groupingMode?: 'date' | 'status' | 'unread',
-  pinnedAsGroup = false,
 ): CollapsedPaginationResult {
-  // A pinned session older than the first display-limit page must still reach
-  // the top pinned group, so pinned rows are partitioned to the front BEFORE
-  // the display-limit slice (stable → lastMessageAt-descending order is kept
-  // within each part; the renderer splits the parts back apart).
-  const orderedItems = pinnedAsGroup
-    ? [
-        ...items.filter(item => item.isFlagged === true),
-        ...items.filter(item => item.isFlagged !== true),
-      ]
-    : items
-
   // Fast path: no collapse state → original slice
   if (!collapsedGroups || collapsedGroups.size === 0) {
     return {
-      paginatedItems: orderedItems.slice(0, displayLimit),
-      hasMore: displayLimit < orderedItems.length,
+      paginatedItems: items.slice(0, displayLimit),
+      hasMore: displayLimit < items.length,
       collapsedGroupsMeta: [],
     }
   }
 
-  const groupKeysInView = new Set(orderedItems.map(item => getCollapseGroupKey(item, groupingMode, pinnedAsGroup)))
+  const groupKeysInView = new Set(items.map(item => getCollapseGroupKey(item, groupingMode)))
 
   // Safety guard: don't allow collapse state to hide the entire list when only one
   // group exists in the current filtered view (there would be no meaningful collapse UX).
   if (groupKeysInView.size <= 1) {
     return {
-      paginatedItems: orderedItems.slice(0, displayLimit),
-      hasMore: displayLimit < orderedItems.length,
+      paginatedItems: items.slice(0, displayLimit),
+      hasMore: displayLimit < items.length,
       collapsedGroupsMeta: [],
     }
   }
@@ -187,8 +164,8 @@ export function computeCollapsedPagination(
 
   if (effectiveCollapsedKeys.size === 0) {
     return {
-      paginatedItems: orderedItems.slice(0, displayLimit),
-      hasMore: displayLimit < orderedItems.length,
+      paginatedItems: items.slice(0, displayLimit),
+      hasMore: displayLimit < items.length,
       collapsedGroupsMeta: [],
     }
   }
@@ -196,8 +173,8 @@ export function computeCollapsedPagination(
   const expandedItems: SessionMeta[] = []
   const collapsedCounts = new Map<string, number>()
 
-  for (const item of orderedItems) {
-    const groupKey = getCollapseGroupKey(item, groupingMode, pinnedAsGroup)
+  for (const item of items) {
+    const groupKey = getCollapseGroupKey(item, groupingMode)
 
     if (effectiveCollapsedKeys.has(groupKey)) {
       collapsedCounts.set(groupKey, (collapsedCounts.get(groupKey) || 0) + 1)
@@ -496,18 +473,12 @@ export function useSessionSearch({
     setDisplayLimit(INITIAL_DISPLAY_LIMIT)
   }, [searchQuery])
 
-  // Pinned sessions form the topmost group in the normal list. Skip the
-  // split when the whole view IS the pinned filter or in search mode — there
-  // a pinned group would just re-count the same rows / break search result
-  // grouping. Must mirror SessionList's rendering decision.
-  const groupPinnedTop = !isSearchMode && currentFilter?.kind !== 'flagged'
-
   // Collapse-aware pagination: collapsed items are excluded entirely from
   // paginatedItems (and therefore flatItems / keyboard nav). Their counts are
   // returned as collapsedGroupsMeta so the renderer can show header-only groups.
   const { paginatedItems, hasMore, collapsedGroupsMeta } = useMemo(() => {
-    return computeCollapsedPagination(searchFilteredItems, displayLimit, collapsedGroups, groupingMode, groupPinnedTop)
-  }, [searchFilteredItems, displayLimit, collapsedGroups, groupingMode, groupPinnedTop])
+    return computeCollapsedPagination(searchFilteredItems, displayLimit, collapsedGroups, groupingMode)
+  }, [searchFilteredItems, displayLimit, collapsedGroups, groupingMode])
 
   const loadMore = useCallback(() => {
     setDisplayLimit(prev => Math.min(prev + BATCH_SIZE, searchFilteredItems.length))
