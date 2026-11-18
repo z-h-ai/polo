@@ -28,9 +28,7 @@ import {
   removeBrowserInstanceAtom,
 } from '@/atoms/browser-pane'
 import { useAppShellContext } from '@/context/AppShellContext'
-import { useConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useTranslation } from 'react-i18next'
-import { toast } from 'sonner'
 import { BrowserTabBadge } from './BrowserTabBadge'
 import type { BrowserInstanceInfo } from '../../../shared/types'
 import { getHostname } from './utils'
@@ -188,17 +186,14 @@ export function BrowserTabStrip({
 
     const browserPaneApi = window.electronAPI?.browserPane
     if (!browserPaneApi) {
-      // A silent no-op reads as a broken click — surface the failure.
-      toast.error(t('browser.focusFailed'))
       console.warn('[BrowserTabStrip] browserPane API unavailable for focus action')
       return
     }
 
     void browserPaneApi.focus(instance.id).catch((error) => {
-      toast.error(t('browser.focusFailed'))
       console.warn(`[BrowserTabStrip] Failed to focus browser window ${instance.id}:`, error)
     })
-  }, [instancesOverride, setActiveInstanceId, t])
+  }, [instancesOverride, setActiveInstanceId])
 
   const openSessionUsingWindow = useCallback((instance: BrowserInstanceInfo) => {
     const sessionId = instance.boundSessionId ?? instance.ownerSessionId
@@ -210,11 +205,9 @@ export function BrowserTabStrip({
     if (!instancesOverride) {
       const browserPaneApi = window.electronAPI?.browserPane
       if (!browserPaneApi) {
-        toast.error(t('browser.terminateFailed'))
         console.warn('[BrowserTabStrip] browserPane API unavailable for terminate action')
       } else {
         void browserPaneApi.destroy(instance.id).catch((error) => {
-          toast.error(t('browser.terminateFailed'))
           console.warn(`[BrowserTabStrip] Failed to terminate browser window ${instance.id}:`, error)
         })
       }
@@ -226,25 +219,7 @@ export function BrowserTabStrip({
       const remaining = instancesRef.current.filter((item) => item.id !== instance.id)
       return remaining[0]?.id ?? null
     })
-  }, [instancesOverride, removeInstance, setActiveInstanceId, t])
-
-  // UX danger guard: terminating kills the web sessions living in that window,
-  // so the menu leaf asks first. Cancel/ESC never writes; the write itself
-  // stays in terminateBrowserWindow (a destroy failure still toasts there).
-  const { requestConfirm: requestTerminateConfirm, confirmElement: terminateConfirmElement } = useConfirmDialog()
-
-  const requestTerminateBrowserWindow = useCallback((instance: BrowserInstanceInfo) => {
-    void (async () => {
-      const confirmed = await requestTerminateConfirm({
-        testId: 'browser-terminate-confirm',
-        title: t('browser.terminateConfirmTitle'),
-        description: t('browser.terminateConfirmDescription'),
-        confirmLabel: t('browser.terminate'),
-      })
-      if (!confirmed) return
-      terminateBrowserWindow(instance)
-    })()
-  }, [requestTerminateConfirm, terminateBrowserWindow, t])
+  }, [instancesOverride, removeInstance, setActiveInstanceId])
 
   const renderBrowserActions = useCallback((instance: BrowserInstanceInfo) => {
     const canUseLiveWindowActions = !instancesOverride
@@ -276,14 +251,14 @@ export function BrowserTabStrip({
         <StyledDropdownMenuItem
           variant="destructive"
           disabled={!canUseLiveWindowActions}
-          onSelect={() => requestTerminateBrowserWindow(instance)}
+          onSelect={() => terminateBrowserWindow(instance)}
         >
           <Icons.XCircle className="h-3.5 w-3.5" />
           {t('browser.terminate')}
         </StyledDropdownMenuItem>
       </>
     )
-  }, [t, instancesOverride, focusBrowserWindow, openSessionUsingWindow, requestTerminateBrowserWindow])
+  }, [t, instancesOverride, focusBrowserWindow, openSessionUsingWindow, terminateBrowserWindow])
 
   if (orderedInstances.length === 0) return null
 
@@ -293,7 +268,6 @@ export function BrowserTabStrip({
 
   return (
     <div className="flex items-center gap-1.5">
-      {terminateConfirmElement}
       {visible.map((instance) => (
         <DropdownMenu key={instance.id}>
           <DropdownMenuTrigger asChild>
