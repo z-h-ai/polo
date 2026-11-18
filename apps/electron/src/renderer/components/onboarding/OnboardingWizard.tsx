@@ -1,5 +1,6 @@
 import { useClientWorkbenchStyle, useClientMaterialScope, clientWorkbenchFocusClassName } from '@/components/ui/client-workbench'
 import { cn } from "@/lib/utils"
+import { useTranslation } from "react-i18next"
 import { WelcomeStep } from "./WelcomeStep"
 import type { ApiSetupMethod } from "./APISetupStep"
 import type { ProviderChoice } from "./ProviderSelectStep"
@@ -55,6 +56,8 @@ interface OnboardingWizardProps {
   onAdminSendPhoneCode?: (phone: string) => Promise<AdminSendPhoneAuthCodeResult>
   onAdminVerifyPhoneCode?: (phone: string, code: string) => Promise<boolean>
   onAdminRelogin?: () => void
+  /** Quiet first-run escape hatch: forwards the existing app-quit channel. */
+  onQuitApp?: () => void
 
   // Claude OAuth (two-step flow)
   isWaitingForCode?: boolean
@@ -92,6 +95,43 @@ interface OnboardingWizardProps {
 }
 
 /**
+ * Neutral fallback for state-machine steps the wizard no longer renders
+ * (legacy provider-select/local-model/credentials can still be SET by
+ * useOnboarding). Previously these fell through to `null` — a full white
+ * screen. This card guarantees there is always a visible way forward:
+ * "Continue" re-enters the rendered admin-login step (or completes the
+ * wizard when no relogin handler exists). Presentation only — the state
+ * machine itself is untouched.
+ */
+function WizardStepFallback({ onContinue }: { onContinue: () => void }) {
+  const { t } = useTranslation()
+  return (
+    <section
+      data-testid="onboarding-step-fallback"
+      className="flex w-full max-w-[420px] flex-col items-center rounded-[20px] border border-border bg-surface p-[30px] text-center shadow-modal-small"
+    >
+      <span className="grid size-[40px] flex-none place-items-center rounded-[10px] bg-foreground text-[18px] font-extrabold text-background" aria-hidden="true">
+        P
+      </span>
+      <h1 className="mt-[14px] m-0 text-[20px] font-bold tracking-[-0.03em] text-foreground">
+        Polo AI
+      </h1>
+      <p className="mt-[8px] m-0 text-[14px] leading-[1.55] text-foreground-60">
+        {t("onboarding.stepFallback.description")}
+      </p>
+      <button
+        type="button"
+        data-testid="onboarding-step-fallback-continue"
+        onClick={onContinue}
+        className="mt-[20px] inline-flex min-h-[40px] w-full items-center justify-center rounded-[8px] border border-accent bg-accent px-[12px] text-[14px] font-medium text-white transition-colors hover:bg-[color-mix(in_srgb,var(--accent)_86%,black)] client-material-control"
+      >
+        {t("onboarding.stepFallback.continue")}
+      </button>
+    </section>
+  )
+}
+
+/**
  * OnboardingWizard - Full-screen onboarding flow container
  *
  * Manages the step-by-step flow for setting up Polo AI:
@@ -110,6 +150,7 @@ export function OnboardingWizard({
   onAdminSendPhoneCode,
   onAdminVerifyPhoneCode,
   onAdminRelogin,
+  onQuitApp,
   // Git Bash (Windows)
   onBrowseGitBash,
   onUseGitBashPath,
@@ -130,6 +171,7 @@ export function OnboardingWizard({
             onVerifyPhoneCode={onAdminVerifyPhoneCode!}
             onSubmit={onAdminLogin!}
             onCancel={onAdminCancelLogin}
+            onQuitApp={onQuitApp}
           />
         )
 
@@ -167,8 +209,12 @@ export function OnboardingWizard({
           />
         )
 
+      // Legacy steps (provider-select/local-model/credentials) are still set
+      // by the useOnboarding state machine but no longer render their own UI.
+      // Never fall through to null — show the neutral fallback so the user
+      // can always continue (see WizardStepFallback above).
       default:
-        return null
+        return <WizardStepFallback onContinue={onAdminRelogin ?? onContinue} />
     }
   }
 
