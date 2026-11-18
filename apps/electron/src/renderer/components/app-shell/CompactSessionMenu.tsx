@@ -108,6 +108,12 @@ export interface CompactSessionMenuProps {
   onOpenInNewWindow: () => void
   onSendToWorkspace?: () => void
   onDelete: () => void
+  /**
+   * Overrides the create-share write so the host can put its confirm ask
+   * (first-share dialog) where it survives this drawer closing. Omitted →
+   * the menu's own `actions.share` runs directly.
+   */
+  onShare?: () => void
 
   // ---------------------------------------------------------------------------
   // Controlled-component shim — used by EntityRow / SessionItem so a single
@@ -144,6 +150,7 @@ export function CompactSessionMenu({
   onOpenInNewWindow,
   onSendToWorkspace,
   onDelete,
+  onShare,
   open: controlledOpen,
   onOpenChange,
   trigger,
@@ -301,7 +308,7 @@ export function CompactSessionMenu({
               hasMessages={_hasMessages}
               hasUnread={_hasUnread}
               hasRemoteWorkspaces={hasRemoteWorkspaces}
-              onShare={closeAfter(actions.share)}
+              onShare={closeAfter(onShare ?? actions.share)}
               onOpenShareSub={() => setView('share')}
               onSendToWorkspace={closeAfter(onSendToWorkspace)}
               onOpenMessagingSub={() => setView('messaging')}

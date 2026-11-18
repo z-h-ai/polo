@@ -26,6 +26,8 @@ import type { SessionBillingErrorClassification } from '@polo-ai/shared/protocol
 import { OnboardingWizard, ReauthScreen } from '@/components/onboarding'
 import { WorkspacePicker } from '@/components/workspace'
 import { ResetConfirmationDialog } from '@/components/ResetConfirmationDialog'
+import { useConfirmDialog } from '@/components/ui/confirm-dialog'
+import { deleteSessionConfirmSpec } from '@/hooks/useSessionConfirmDialogs'
 import { SplashScreen } from '@/components/SplashScreen'
 import { TooltipProvider } from '@polo-ai/ui'
 import { FocusProvider } from '@/context/FocusContext'
@@ -324,6 +326,10 @@ function SessionLoadErrorScreen({
 
 export default function App() {
   const { t } = useTranslation()
+
+  // In-app destructive-confirmation host for session deletion — the dialog
+  // element renders in the ready-state tree (next to ResetConfirmationDialog).
+  const { requestConfirm: requestDeleteConfirm, confirmElement: deleteConfirmElement } = useConfirmDialog()
 
   // Initialize renderer perf tracking early (debug mode = running from source)
   // Uses useEffect with empty deps to run once on mount before any session switches
@@ -2363,7 +2369,13 @@ export default function App() {
       const isEmpty = !meta || (!meta.lastFinalMessageId && !meta.name)
 
       if (!isEmpty) {
-        const confirmed = await window.electronAPI.showDeleteSessionConfirmation(meta?.name || 'Untitled')
+        // In-app confirm dialog (same design-system ConfirmDialog as every
+        // other destructive ask) instead of the OS-native one: names the
+        // session and states the deletion is irreversible. Cancel/ESC never
+        // deletes. Empty sessions above skip this ask entirely.
+        const confirmed = await requestDeleteConfirm(
+          deleteSessionConfirmSpec(meta?.name || t('chat.session'), t),
+        )
         if (!confirmed) return false
       }
     }
@@ -2379,7 +2391,7 @@ export default function App() {
     // Remove from per-session atom and metadata map (no sessionsAtom)
     removeSession(sessionId)
     return true
-  }, [store, removeSession, t])
+  }, [store, removeSession, t, requestDeleteConfirm])
 
   // Auto-delete handler for empty sessions (fire-and-forget, no confirmation)
   const handleAutoDeleteEmptySession = useCallback((sessionId: string) => {
@@ -4212,6 +4224,8 @@ export default function App() {
                       onConfirm={executeReset}
                       onCancel={() => setShowResetDialog(false)}
                     />
+                    {/* Delete-session confirmation (in-app ConfirmDialog) */}
+                    {deleteConfirmElement}
                   </div>
                 </NavigationProvider>
               )}
