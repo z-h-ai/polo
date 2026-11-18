@@ -439,6 +439,10 @@ describe('AdminLoginStep rendered modes', () => {
     expect(screen.queryByTestId('admin-login-method-phone')).toBeNull()
     await user.type(screen.getByLabelText('Phone number or username'), ' legacy-user ')
     await user.type(screen.getByLabelText('Password'), 'password-123')
+    // Explicit consent: submit stays disabled until the agreement is checked.
+    expect((screen.getByRole('button', { name: 'Continue' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByTestId('admin-login-consent-required')).toBeTruthy()
+    await user.click(screen.getByRole('checkbox'))
     await user.click(screen.getByRole('button', { name: 'Continue' }))
     expect(onSubmit).toHaveBeenCalledWith('legacy-user', 'password-123')
   })

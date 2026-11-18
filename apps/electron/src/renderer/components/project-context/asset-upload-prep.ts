@@ -78,16 +78,24 @@ export interface PreparedAssetUpload {
   digestSha256: string
 }
 
+/** The two observable prep stages (staged-feedback UX): the whole-file read,
+ * then the integrity digest. `pcUploadFile` has no progress events (a single
+ * request/response RPC), so these renderer-side stages are what the user gets. */
+export type AssetUploadPrepPhase = 'reading' | 'verifying'
+
 /**
  * Reads the picked file once and derives everything the upload RPC needs.
  * `maxBytes` is the server-advertised limit — enforced here so an oversized
  * pick fails locally with actionable copy instead of a wire rejection.
+ * `onPhase` reports the stage transition (read → digest) so slow files show
+ * WHICH step is running instead of one frozen 「正在读取」 line.
  */
 export async function prepareAssetUploadFile(
   filePath: string,
   maxBytes: number,
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; onPhase?: (phase: AssetUploadPrepPhase) => void } = {},
 ): Promise<PreparedAssetUpload> {
+  options.onPhase?.('reading')
   let bytes: Uint8Array
   try {
     bytes = await window.electronAPI.readFileBinary(filePath)
@@ -102,6 +110,7 @@ export async function prepareAssetUploadFile(
   // Incremental SHA-256 over fixed chunks: identical digest to a one-shot
   // crypto.subtle.digest, but the hashing stays cancellable and never
   // doubles the file's memory footprint.
+  options.onPhase?.('verifying')
   const hash = new IncrementalSha256()
   for (let offset = 0; offset < bytes.byteLength; offset += SHA256_CHUNK_BYTES) {
     if (options.signal?.aborted) throw new AssetUploadPrepError('read_failed')

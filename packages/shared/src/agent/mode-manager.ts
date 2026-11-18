@@ -15,6 +15,7 @@
 import { homedir } from 'os';
 import { existsSync, realpathSync } from 'fs';
 import { debug } from '../utils/debug.ts';
+import { i18n } from '../i18n';
 import { dirname, isAbsolute, relative, resolve } from 'path';
 import { getSessionSafeAllowedToolNames } from '@polo-ai/session-tools-core';
 import { FEATURE_FLAGS } from '../feature-flags.ts';
@@ -2035,7 +2036,11 @@ export function shouldAllowToolInMode(
       // Write/auth/admin session tools - blocked in Explore mode
       return {
         allowed: false,
-        reason: `Session configuration changes are blocked in ${config.displayName}. Switch to Ask or Allow All mode (${config.shortcutHint}) to create, update, or delete sources and agents.`
+        reason: localizedBlockReason(
+          'mode.blockReason.sessionConfig',
+          'Session configuration changes are blocked in {{mode}} mode. Switch to Ask or Allow All mode ({{shortcut}}) to create, update, or delete sources and agents.',
+          { mode: config.displayName, shortcut: config.shortcutHint },
+        )
       };
     }
 
@@ -2050,7 +2055,11 @@ export function shouldAllowToolInMode(
       }
       return {
         allowed: false,
-        reason: `API ${method} ${path ?? ''} is blocked in ${config.displayName}. Switch to Ask or Allow All mode (${config.shortcutHint}) to make changes.`
+        reason: localizedBlockReason(
+          'mode.blockReason.apiCall',
+          'API {{method}} {{path}} is blocked in {{mode}} mode. Switch to Ask or Allow All mode ({{shortcut}}) to make changes.',
+          { method, path: path ?? '', mode: config.displayName, shortcut: config.shortcutHint },
+        )
       };
     }
 
@@ -2059,7 +2068,11 @@ export function shouldAllowToolInMode(
     }
     return {
       allowed: false,
-      reason: `MCP write operations are blocked in ${config.displayName}. Switch to Ask or Allow All mode (${config.shortcutHint}) to make changes.`
+      reason: localizedBlockReason(
+        'mode.blockReason.mcpWrite',
+        'MCP write operations are blocked in {{mode}} mode. Switch to Ask or Allow All mode ({{shortcut}}) to make changes.',
+        { mode: config.displayName, shortcut: config.shortcutHint },
+      )
     };
   }
 
@@ -2073,7 +2086,11 @@ export function shouldAllowToolInMode(
     }
     return {
       allowed: false,
-      reason: `API ${method} ${path ?? ''} is blocked in ${config.displayName}. Switch to Ask or Allow All mode (${config.shortcutHint}) to make changes.`
+      reason: localizedBlockReason(
+        'mode.blockReason.apiCall',
+        'API {{method}} {{path}} is blocked in {{mode}} mode. Switch to Ask or Allow All mode ({{shortcut}}) to make changes.',
+        { method, path: path ?? '', mode: config.displayName, shortcut: config.shortcutHint },
+      )
     };
   }
 
@@ -2082,25 +2099,57 @@ export function shouldAllowToolInMode(
 }
 
 /**
+ * Localized block reason for permission-mode tool blocking.
+ *
+ * These reasons surface in the chat as system/tool-error messages, so they
+ * must speak the user's language: what was blocked, why, and how to switch
+ * modes. Resolves `mode.blockReason.*` through the shared i18n instance
+ * (initialized by every host process at boot); falls back to the English
+ * template when i18n is unavailable (unit tests, CLI edge paths) so the
+ * copy is never a bare i18n key. Interpolation params match the previous
+ * inline templates: {{mode}} / {{shortcut}} / {{tool}} / {{method}} / {{path}}.
+ */
+function localizedBlockReason(key: string, fallback: string, params: Record<string, unknown> = {}): string {
+  let translated: unknown
+  try {
+    translated = i18n.t(key, { defaultValue: fallback, ...params })
+  } catch {
+    // i18n not initialized in this process — use the English template.
+    return interpolate(fallback, params)
+  }
+  if (typeof translated !== 'string' || !translated.trim() || translated === key) {
+    return interpolate(fallback, params)
+  }
+  // Collapse artifacts from empty interpolations (e.g. missing API path).
+  return translated.replace(/[ \t]{2,}/g, ' ').trim();
+}
+
+function interpolate(template: string, params: Record<string, unknown>): string {
+  return template.replace(/\{\{(\w+)\}\}/g, (match, name: string) => {
+    const value = params[name]
+    return value === undefined ? match : String(value)
+  }).replace(/[ \t]{2,}/g, ' ').trim();
+}
+
+/**
  * Get a user-friendly message explaining why a tool is blocked (using config)
  */
 function getBlockReasonWithConfig(toolName: string, config: ToolCheckConfig): string {
-  const displayName = config.displayName;
-  const shortcut = config.shortcutHint;
+  const modeParams = { mode: config.displayName, shortcut: config.shortcutHint };
 
   if (toolName === 'Bash') {
-    return `Bash commands are blocked in ${displayName}. Switch to Ask or Allow All mode (${shortcut}) to run commands.`;
+    return localizedBlockReason('mode.blockReason.bash', 'Bash commands are blocked in {{mode}} mode. Switch to Ask or Allow All mode ({{shortcut}}) to run commands.', modeParams);
   }
   if (toolName === 'Write' || toolName === 'Edit' || toolName === 'MultiEdit') {
-    return `File modifications are blocked in ${displayName}. Switch to Ask or Allow All mode (${shortcut}) to make changes.`;
+    return localizedBlockReason('mode.blockReason.fileEdit', 'File modifications are blocked in {{mode}} mode. Switch to Ask or Allow All mode ({{shortcut}}) to make changes.', modeParams);
   }
   if (toolName.startsWith('mcp__')) {
-    return `MCP write operations are blocked in ${displayName}. Switch to Ask or Allow All mode (${shortcut}) to make changes.`;
+    return localizedBlockReason('mode.blockReason.mcpWrite', 'MCP write operations are blocked in {{mode}} mode. Switch to Ask or Allow All mode ({{shortcut}}) to make changes.', modeParams);
   }
   if (toolName.startsWith('api_')) {
-    return `API mutations are blocked in ${displayName}. Switch to Ask or Allow All mode (${shortcut}) to make changes.`;
+    return localizedBlockReason('mode.blockReason.apiMutation', 'API mutations are blocked in {{mode}} mode. Switch to Ask or Allow All mode ({{shortcut}}) to make changes.', modeParams);
   }
-  return `${toolName} is blocked in ${displayName}. Switch to Ask or Allow All mode (${shortcut}) to use this tool.`;
+  return localizedBlockReason('mode.blockReason.tool', '{{tool}} is blocked in {{mode}} mode. Switch to Ask or Allow All mode ({{shortcut}}) to use this tool.', { ...modeParams, tool: toolName });
 }
 
 /**

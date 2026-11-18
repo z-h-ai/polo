@@ -26,6 +26,8 @@ import type { SessionBillingErrorClassification } from '@polo-ai/shared/protocol
 import { OnboardingWizard, ReauthScreen } from '@/components/onboarding'
 import { WorkspacePicker } from '@/components/workspace'
 import { ResetConfirmationDialog } from '@/components/ResetConfirmationDialog'
+import { useConfirmDialog } from '@/components/ui/confirm-dialog'
+import { deleteSessionConfirmSpec } from '@/hooks/useSessionConfirmDialogs'
 import { SplashScreen } from '@/components/SplashScreen'
 import { TooltipProvider } from '@polo-ai/ui'
 import { FocusProvider } from '@/context/FocusContext'
@@ -290,9 +292,16 @@ function SessionLoadErrorScreen({
         <p className="mt-2 text-sm text-foreground/60">
           {t("errors.failedToLoadSessionsDesc")}
         </p>
-        <p className="mt-3 rounded-lg bg-foreground/5 px-3 py-2 text-left text-xs text-foreground/70 break-words">
-          {message}
-        </p>
+        {/* Raw technical diagnostic is opt-in: collapsed by default, expandable
+            so users can copy it when reporting an issue. */}
+        <details data-testid="session-load-error-details" className="mt-3 text-left">
+          <summary className="cursor-pointer select-none text-xs text-foreground/50 hover:text-foreground/70">
+            {t("errors.technicalDetails")}
+          </summary>
+          <pre className="mt-2 rounded-lg bg-foreground/5 px-3 py-2 text-left text-xs text-foreground/70 break-words whitespace-pre-wrap">
+            {message}
+          </pre>
+        </details>
         <button
           type="button"
           onClick={onRetry}
@@ -318,6 +327,10 @@ function SessionLoadErrorScreen({
 export default function App() {
   const { t } = useTranslation()
 
+  // In-app destructive-confirmation host for session deletion — the dialog
+  // element renders in the ready-state tree (next to ResetConfirmationDialog).
+  const { requestConfirm: requestDeleteConfirm, confirmElement: deleteConfirmElement } = useConfirmDialog()
+
   // Initialize renderer perf tracking early (debug mode = running from source)
   // Uses useEffect with empty deps to run once on mount before any session switches
   useEffect(() => {
@@ -339,6 +352,10 @@ export default function App() {
     personalId: string | null
   }>({ accountId: null, activeId: null, personalId: null })
   const [setupNeeds, setSetupNeeds] = useState<SetupNeeds | null>(null)
+  // Space-select gate logout: keeps the gate mounted (no error-screen flash)
+  // while the trusted logout runs. Success flips to 'onboarding' inside
+  // handleAdminLogout; failure stays here with the toast as the error face.
+  const [isLoggingOutFromSpaceSelect, setIsLoggingOutFromSpaceSelect] = useState(false)
 
   // Per-session Jotai atom setters for isolated updates
   // NOTE: No sessionsAtom - we don't store a Session[] array anywhere to prevent memory leaks
@@ -2352,7 +2369,13 @@ export default function App() {
       const isEmpty = !meta || (!meta.lastFinalMessageId && !meta.name)
 
       if (!isEmpty) {
-        const confirmed = await window.electronAPI.showDeleteSessionConfirmation(meta?.name || 'Untitled')
+        // In-app confirm dialog (same design-system ConfirmDialog as every
+        // other destructive ask) instead of the OS-native one: names the
+        // session and states the deletion is irreversible. Cancel/ESC never
+        // deletes. Empty sessions above skip this ask entirely.
+        const confirmed = await requestDeleteConfirm(
+          deleteSessionConfirmSpec(meta?.name || t('chat.session'), t),
+        )
         if (!confirmed) return false
       }
     }
@@ -2368,7 +2391,7 @@ export default function App() {
     // Remove from per-session atom and metadata map (no sessionsAtom)
     removeSession(sessionId)
     return true
-  }, [store, removeSession, t])
+  }, [store, removeSession, t, requestDeleteConfirm])
 
   // Auto-delete handler for empty sessions (fire-and-forget, no confirmation)
   const handleAutoDeleteEmptySession = useCallback((sessionId: string) => {
@@ -2582,7 +2605,10 @@ export default function App() {
             messages: [...s.messages, {
               id: generateMessageId(),
               role: 'warning' as const,
-              content: `⚠️ ${failedCount} attachment(s) could not be stored and will not be sent: ${failedNames}`,
+              // i18n warning card copy ({{count}}/{{names}} interpolation);
+              // the Info-themed bubble in ChatDisplay already carries the
+              // "Warning" header, so the text itself stays plain.
+              content: t('chat.attachments.storeFailedWarning', { count: failedCount, names: failedNames }),
               timestamp: Date.now()
             }]
           }))
@@ -3854,16 +3880,20 @@ export default function App() {
               account={currentAdminUser
                 ? { displayName: currentAdminUser.displayName ?? '', username: currentAdminUser.username ?? '' }
                 : null}
-              submitting={productSpace.pendingSwitch !== null}
+              submitting={productSpace.pendingSwitch !== null || isLoggingOutFromSpaceSelect}
               onConfirm={handleSpaceSelectConfirm}
               onLogout={() => {
                 productSpaceRef.current.cancelSwitch()
                 setSpaceSelectTarget(null)
                 adminAuthCompletion.cancel()
                 onboarding.handleAdminRelogin()
-                // If trusted logout/revocation fails, keep recovery available.
-                setAppState('space-error')
-                void handleAdminLogout()
+                // UX: enter the logout flow immediately and STAY on this gate —
+                // the previous `setAppState('space-error')` here flashed the
+                // "workspace unavailable" error screen before every logout.
+                // Success switches to 'onboarding' inside handleAdminLogout;
+                // a failed logout keeps this gate plus its toast error face.
+                setIsLoggingOutFromSpaceSelect(true)
+                void handleAdminLogout().finally(() => setIsLoggingOutFromSpaceSelect(false))
               }}
             />
             <ProductSpaceSwitchDialog />
@@ -3920,6 +3950,7 @@ export default function App() {
             onAdminSendPhoneCode={onboarding.handleAdminSendPhoneCode}
             onAdminVerifyPhoneCode={onboarding.handleAdminVerifyPhoneCode}
             onAdminRelogin={onboarding.handleAdminRelogin}
+            onQuitApp={() => { void window.electronAPI.menuQuit() }}
             onSubmitLocalModel={onboarding.handleSubmitLocalModel}
             onStartOAuth={onboarding.handleStartOAuth}
             onFinish={onboarding.handleFinish}
@@ -4193,6 +4224,8 @@ export default function App() {
                       onConfirm={executeReset}
                       onCancel={() => setShowResetDialog(false)}
                     />
+                    {/* Delete-session confirmation (in-app ConfirmDialog) */}
+                    {deleteConfirmElement}
                   </div>
                 </NavigationProvider>
               )}

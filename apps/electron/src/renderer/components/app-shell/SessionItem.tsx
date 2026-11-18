@@ -138,6 +138,7 @@ export function SessionItem({
           onSendToWorkspace={ctx.onSendToWorkspace ? () => ctx.onSendToWorkspace!([item.id]) : undefined}
           hasRemoteWorkspaces={hasRemoteWorkspaces}
           onDelete={() => ctx.onDelete(item.id)}
+          onShare={ctx.onShareRequest ? () => ctx.onShareRequest!(item) : undefined}
         />
       }
       contextMenuContent={ctx.isMultiSelectActive && isInMultiSelect ? <BatchSessionMenu /> : undefined}
@@ -163,6 +164,7 @@ export function SessionItem({
           onOpenInNewWindow={() => ctx.onOpenInNewWindow(item)}
           onSendToWorkspace={ctx.onSendToWorkspace ? () => ctx.onSendToWorkspace!([item.id]) : undefined}
           onDelete={() => ctx.onDelete(item.id)}
+          onShare={ctx.onShareRequest ? () => ctx.onShareRequest!(item) : undefined}
         />
       )}
       icon={

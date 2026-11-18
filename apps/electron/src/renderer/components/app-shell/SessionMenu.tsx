@@ -65,6 +65,12 @@ export interface SessionMenuProps {
   onOpenInNewWindow: () => void
   onSendToWorkspace?: () => void
   onDelete: () => void
+  /**
+   * Overrides the create-share write so the host can put its confirm ask
+   * (first-share dialog) where it survives this menu unmounting. Omitted →
+   * the menu's own `actions.share` runs directly.
+   */
+  onShare?: () => void
 }
 
 /**
@@ -86,6 +92,7 @@ export function SessionMenu({
   onOpenInNewWindow,
   onSendToWorkspace,
   onDelete,
+  onShare,
   hasRemoteWorkspaces,
 }: SessionMenuProps) {
   const { t } = useTranslation()
@@ -108,7 +115,7 @@ export function SessionMenu({
     <>
       {/* Share/Shared based on shared state */}
       {!sharedUrl ? (
-        <MenuItem onClick={actions.share}>
+        <MenuItem onClick={onShare ?? actions.share}>
           <CloudUpload className="h-3.5 w-3.5" />
           <span className="flex-1">{t("sessionMenu.share")}</span>
         </MenuItem>

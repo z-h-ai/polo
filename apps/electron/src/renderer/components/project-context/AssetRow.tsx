@@ -78,6 +78,18 @@ export interface AssetRowProps extends AssetRowActionHandlers {
   canDownload?: boolean
   /** Row-level pending flag while this asset's in-flight mutation resolves. */
   busy?: boolean
+  /**
+   * True when the bounded prep poll ran out its 60s budget for this still-
+   * processing row: the badge names the timeout and clicking re-checks, so a
+   * beginner can tell 「慢」 from 「卡死」 instead of an eternal 正在准备.
+   */
+  prepTimedOut?: boolean
+  /**
+   * Row-level recheck exit (re-fetch this one asset). Also makes a FAILED
+   * badge clickable — the same 「re-pull the truth」 semantics for the failure
+   * terminal state (e.g. someone else's rebuild landed).
+   */
+  onRecheck?: (asset: PcAssetDto) => void
 }
 
 export function AssetRow({
@@ -88,6 +100,8 @@ export function AssetRow({
   canIndexRetry = false,
   canDownload = true,
   busy = false,
+  prepTimedOut = false,
+  onRecheck,
   onPreview,
   onDownload,
   onReplace,
@@ -103,6 +117,12 @@ export function AssetRow({
   const isHtmlPreview = asset.current.mime === 'text/html'
   const currentConfirmed = asset.current.confirmedAt !== null
   const trashed = mode === 'trash'
+  // The clickable-badge exit: a budgeted-out prep poll (explicit 「超时」 copy)
+  // or a failed version (same re-pull-the-truth semantics). Trash rows have
+  // no poll and no recheck.
+  const recheckable = !trashed && !!onRecheck
+    && (asset.current.processing === 'failed'
+      || (asset.current.processing === 'processing' && prepTimedOut))
 
   return (
     <div
@@ -164,7 +184,24 @@ export function AssetRow({
         </div>
       </div>
 
-      {status && (
+      {recheckable ? (
+        <button
+          type="button"
+          onClick={() => onRecheck?.(asset)}
+          className={cn(
+            'shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium transition-opacity hover:opacity-80',
+            asset.current.processing === 'processing'
+              ? 'bg-amber-500/15 text-amber-600'
+              : 'bg-destructive/10 text-destructive',
+          )}
+          data-testid={`pc-asset-status-${asset.id}`}
+          data-recheckable="true"
+        >
+          {asset.current.processing === 'processing'
+            ? t('projectContext.status.prepTimedOut')
+            : status?.label}
+        </button>
+      ) : status && (
         <span
           className={cn('shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium', status.className)}
           data-testid={`pc-asset-status-${asset.id}`}

@@ -1399,9 +1399,12 @@ export function FreeFormInput({
       size: new Blob([text]).size,
     }
     setAttachments(prev => [...prev, attachment])
+    // Light heads-up: the pasted text became a .txt attachment, not message
+    // body — without this, users assume the text is directly in the message.
+    toast.info(t('chatInput.pasteConvertedToFile', { name: fileName }))
     // Focus input after adding attachment
     richInputRef.current?.focus()
-  }, []) // No deps needed - uses ref
+  }, [t]) // uses ref for attachments; t for the conversion toast copy
 
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault()
@@ -2054,6 +2057,9 @@ export function FreeFormInput({
           {/* Status slot overlay - escape interrupt (highest priority), browser status, etc. */}
           <ToolbarStatusSlot
             showEscapeOverlay={isProcessing && showEscapeOverlay}
+            // The desktop-only persistent interrupt hint; the compact toolbar
+            // is too squeezed for an ambient line.
+            showEscHint={isProcessing && !compactMode}
             sessionId={sessionId}
           />
 

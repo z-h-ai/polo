@@ -51,8 +51,10 @@ import {
   DropdownMenu,
   DropdownMenuTrigger,
   StyledDropdownMenuItem,
+  StyledDropdownMenuSeparator,
 } from "@/components/ui/styled-dropdown"
 import { CurrentProductSpaceLabel } from "@/components/product-space/ProductSpaceSwitcher"
+import { useConfirmDialog } from "@/components/ui/confirm-dialog"
 import { WorkbenchAccountMenu } from "../app-menu/WorkbenchAccountMenu"
 import { POLO_TAB_ID, type TabInstance } from "../../../shared/tab-browser-types"
 import { localizedTabTitle } from "@/lib/tab-display-name"
@@ -212,6 +214,14 @@ export function TopBar() {
   const userLabel = user?.displayName || user?.username || ""
   const userInitial = userLabel.trim().charAt(0)
 
+  // UX danger guard: "Log out" one-click revokes the space context, signs out
+  // AND clears every local account-scoped projection (App.resetAccountScopedClientState)
+  // while stopping running executions — far too costly for a mis-click. The
+  // ask lives HERE (not inside the dropdown content) because Radix unmounts
+  // the menu on close; the bar outlives it, same lifetime argument as the
+  // payment handoff above.
+  const { requestConfirm: requestLogoutConfirm, confirmElement: logoutConfirmElement } = useConfirmDialog()
+
   // POO-205 Spec §10 / C4 (A): in an ENTERPRISE committed space the Polo tab
   // retires — chat lives ONLY inside project tabs (title = project name). The
   // strip reads the CONTEXT's openTabs, which is already the space-visible
@@ -237,6 +247,14 @@ export function TopBar() {
       activateTab(openPoloTab.id)
     }
     navigate(routes.view.allSessions(sessionId))
+  }
+
+  // Overflow entry for the capped notification list: the sessions navigator
+  // lives in the Polo tab, so bring it forward when it's already open (same
+  // tab-focus contract as openSessionFromNotification).
+  const openAllSessionsFromNotifications = () => {
+    if (openPoloTab) activateTab(openPoloTab.id)
+    navigate(routes.view.allSessions())
   }
 
   return (
@@ -388,17 +406,35 @@ export function TopBar() {
                 {t("topbar.notifications.empty")}
               </div>
             ) : (
-              visibleUnreadSessions.map((meta) => (
-                <StyledDropdownMenuItem
-                  key={meta.id}
-                  onClick={() => openSessionFromNotification(meta.id)}
-                >
-                  <span className="min-w-0 flex-1 truncate">{getSessionTitle(meta)}</span>
-                  {visibleUnreadSessions.length > 1 && (
-                    <ChevronRight className="h-3 w-3 text-muted-foreground" />
-                  )}
-                </StyledDropdownMenuItem>
-              ))
+              <>
+                {visibleUnreadSessions.map((meta) => (
+                  <StyledDropdownMenuItem
+                    key={meta.id}
+                    onClick={() => openSessionFromNotification(meta.id)}
+                  >
+                    <span className="min-w-0 flex-1 truncate">{getSessionTitle(meta)}</span>
+                    {visibleUnreadSessions.length > 1 && (
+                      <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                    )}
+                  </StyledDropdownMenuItem>
+                ))}
+                {/* Only when the list was actually truncated — nothing to
+                    "see more" when every unread item is already shown. */}
+                {unreadSessions.length > visibleUnreadSessions.length && (
+                  <>
+                    <StyledDropdownMenuSeparator />
+                    <StyledDropdownMenuItem
+                      data-testid="topbar-notifications-view-all"
+                      onClick={openAllSessionsFromNotifications}
+                    >
+                      <span className="min-w-0 flex-1 text-muted-foreground">
+                        {t("topbar.notifications.viewAllSessions")}
+                      </span>
+                      <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                    </StyledDropdownMenuItem>
+                  </>
+                )}
+              </>
             )}
           </WorkbenchMenuContent>
         </DropdownMenu>
@@ -426,9 +462,20 @@ export function TopBar() {
               onOpenPayment={() => { void openPayment() }}
               canOpenEnterpriseWorkflows={canOpenEnterpriseWorkflows}
               onOpenEnterpriseWorkflow={(workflow) => { void openEnterpriseWorkflow(workflow) }}
+              onLogoutRequest={() => {
+                void requestLogoutConfirm({
+                  testId: "topbar-logout-confirm",
+                  title: t("topbar.account.logoutConfirmTitle", { name: userLabel }),
+                  description: t("topbar.account.logoutConfirmDescription"),
+                  confirmLabel: t("topbar.account.logout"),
+                  onConfirm: () => appShell?.onAdminLogout?.(),
+                })
+              }}
             />
           </WorkbenchMenuContent>
         </DropdownMenu>
+
+        {logoutConfirmElement}
       </div>
     </div>
   )

@@ -54,6 +54,20 @@ export const meta: DetailsPageMeta = {
   slug: 'workspace',
 }
 
+/**
+ * Internal WorkspaceSettings keys → localized, human-readable labels.
+ * Used only for the save-failure toast so users never see raw keys like
+ * "permissionMode". Keys not listed here fall back to the raw key string.
+ */
+const WORKSPACE_SETTING_LABEL_KEYS: Record<string, string> = {
+  name: 'settings.workspace.settingLabel.name',
+  permissionMode: 'settings.workspace.settingLabel.permissionMode',
+  workingDirectory: 'settings.workspace.settingLabel.workingDirectory',
+  localMcpEnabled: 'settings.workspace.settingLabel.localMcpEnabled',
+  enabledSourceSlugs: 'settings.workspace.settingLabel.enabledSourceSlugs',
+  cyclablePermissionModes: 'settings.workspace.settingLabel.cyclablePermissionModes',
+}
+
 // ============================================
 // Main Component
 // ============================================
@@ -211,10 +225,13 @@ export default function WorkspaceSettingsPage() {
         await window.electronAPI.updateWorkspaceSetting(activeWorkspaceId, key, value)
         return true
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Unknown error'
         console.error(`Failed to save ${String(key)}:`, error)
-        toast.error(t("settings.workspace.failedToSave", { setting: String(key) }), {
-          description: message,
+        // Internal setting keys mean nothing to users — show the localized
+        // human label instead; raw diagnostic stays in the console.
+        const labelKey = WORKSPACE_SETTING_LABEL_KEYS[key as string]
+        const settingLabel = labelKey ? t(labelKey) : String(key)
+        toast.error(t("settings.workspace.failedToSave", { setting: settingLabel }), {
+          description: t("settings.workspace.failedToSaveDesc"),
         })
         return false
       }

@@ -6,7 +6,7 @@ import { getDateLocale } from "@polo-ai/shared/i18n"
 import { useAction } from "@/actions"
 import { Inbox, Archive } from "lucide-react"
 
-import { getSessionStatus } from "@/utils/session"
+import { getSessionStatus, getSessionTitle } from "@/utils/session"
 import * as storage from "@/lib/local-storage"
 import { KEYS } from "@/lib/local-storage"
 import type { LabelConfig } from "@polo-ai/shared/labels"
@@ -22,6 +22,7 @@ import { SessionListProvider, type SessionListContextValue } from "@/context/Ses
 import { useSessionSelection, useSessionSelectionStore } from "@/hooks/useSession"
 import { useSessionSearch, type FilterMode } from "@/hooks/useSessionSearch"
 import { useSessionActions } from "@/hooks/useSessionActions"
+import { useShareSessionConfirm } from "@/hooks/useSessionConfirmDialogs"
 import { useEntityListInteractions } from "@/hooks/useEntityListInteractions"
 import { useFocusZone } from "@/hooks/keyboard"
 import { useEscapeInterrupt } from "@/context/EscapeInterruptContext"
@@ -586,6 +587,14 @@ export function SessionList({
     })
   }, [])
 
+  // --- Share confirm (first create of a public link) ---
+  // The dialog element is owned here (not inside the per-row menus) so it
+  // survives the dropdown/drawer unmounting when the Share item is tapped.
+  const { requestShare, confirmElement: shareConfirmElement } = useShareSessionConfirm()
+  const handleShareRequest = useCallback((item: SessionMeta) => {
+    requestShare({ id: item.id, name: getSessionTitle(item) })
+  }, [requestShare])
+
   const handleRenameSubmit = () => {
     if (renameSessionId && renameName.trim()) {
       onRename(renameSessionId, renameName.trim())
@@ -629,6 +638,7 @@ export function SessionList({
     onSelectSessionById: handleSelectSessionById,
     onOpenInNewWindow: handleOpenInNewWindow,
     onSendToWorkspace: (ids: string[]) => setSendToWorkspace(ids),
+    onShareRequest: handleShareRequest,
     onFocusZone: handleFocusZone,
     onKeyDown: handleKeyDown,
     sessionStatuses,
@@ -648,6 +658,7 @@ export function SessionList({
     onArchive, handleArchiveWithToast, onUnarchive, handleUnarchiveWithToast,
     onMarkUnread, handleDeleteWithToast, onLabelsChange,
     handleSelectSessionById, handleOpenInNewWindow, setSendToWorkspace, handleFocusZone, handleKeyDown,
+    handleShareRequest,
     sessionStatuses, flatLabels, labels, resolvedSearchQuery,
     focusedSessionId, selectionStore.state.selected, isMultiSelectActive,
     sessionOptions, contentSearchResults, activeChatMatchInfo, hasPendingPrompt, hasPendingQuestion,
@@ -786,6 +797,9 @@ export function SessionList({
         onSubmit={handleRenameSubmit}
         placeholder={t("session.enterSessionName")}
       />
+
+      {/* Share-confirm dialog (first create of a public link) */}
+      {shareConfirmElement}
     </div>
   )
 }

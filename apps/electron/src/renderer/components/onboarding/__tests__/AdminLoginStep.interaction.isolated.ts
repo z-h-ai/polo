@@ -94,7 +94,7 @@ function renderLoginHarness(options: {
 }
 
 describe('AdminLoginStep password form interactions', () => {
-  it('gates submit on fields and consent, submits trimmed identifier via Enter, and blocks duplicates while busy', async () => {
+  it('gates submit on fields and explicit consent, submits trimmed identifier via Enter, and blocks duplicates while busy', async () => {
     const onSubmit = mock(() => {})
     const user = userEvent.setup({ document: window.document })
     renderLoginHarness({ phoneAuthEnabled: false, onSubmit })
@@ -108,14 +108,22 @@ describe('AdminLoginStep password form interactions', () => {
     expect((continueButton as HTMLButtonElement).disabled).toBe(true)
 
     await user.type(passwordInput, 'password-123')
-    expect((continueButton as HTMLButtonElement).disabled).toBe(false)
-
-    // Agreement unchecked must block submission.
-    const consent = screen.getByRole('checkbox') as HTMLInputElement
-    expect(consent.checked).toBe(true)
-    await user.click(consent)
-    expect(consent.checked).toBe(false)
+    // Explicit consent: the agreement starts UNCHECKED, so filled fields are
+    // still not enough — the disabled button carries a one-line hint.
     expect((continueButton as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByTestId('admin-login-consent-required')).toBeTruthy()
+
+    const consent = screen.getByRole('checkbox') as HTMLInputElement
+    expect(consent.checked).toBe(false)
+    await user.click(consent)
+    expect(consent.checked).toBe(true)
+    expect((continueButton as HTMLButtonElement).disabled).toBe(false)
+    expect(screen.queryByTestId('admin-login-consent-required')).toBeNull()
+
+    // Withdrawing consent re-locks the form and restores the hint.
+    await user.click(consent)
+    expect((continueButton as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByTestId('admin-login-consent-required')).toBeTruthy()
     fireEvent.submit(screen.getByTestId('admin-password-login-form'))
     expect(onSubmit).not.toHaveBeenCalled()
 
@@ -141,6 +149,7 @@ describe('AdminLoginStep password form interactions', () => {
     await user.type(screen.getByLabelText(PASSWORD_LABEL), 'password-123')
 
     const continueButton = screen.getByRole('button', { name: CONTINUE_LABEL })
+    await user.click(screen.getByRole('checkbox'))
     await user.click(continueButton)
     expect(onSubmit).toHaveBeenCalledTimes(1)
     expect(onSubmit).toHaveBeenCalledWith('legacy-user', 'password-123')
@@ -198,6 +207,7 @@ describe('AdminLoginStep password form interactions', () => {
 
     await user.type(screen.getByLabelText(IDENTIFIER_LABEL), '13800138000')
     await user.type(passwordInput, 'password-123')
+    await user.click(screen.getByRole('checkbox'))
     await user.click(screen.getByRole('button', { name: CONTINUE_LABEL }))
 
     expect(onSubmit).toHaveBeenCalledWith('13800138000', 'password-123')

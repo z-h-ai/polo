@@ -177,10 +177,10 @@ describe('useSessionMenuActions.share', () => {
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
   }
 
-  // POO-166: sharing no longer asks through a confirm dialog — the first tap
-  // publishes immediately (sessionCommand fires synchronously in the same
-  // task, with no dialog round-trip in between).
-  it('publishes on the first tap without a confirm round-trip, then toasts the copied link', async () => {
+  // `share()` is the confirmed write routine — the first-create confirm ask
+  // lives at the entry points (`useShareSessionConfirm`), so once invoked the
+  // publish fires synchronously in the same task, with no dialog round-trip.
+  it('publishes immediately when invoked (the confirm ask lives at the entry points), then toasts the copied link', async () => {
     const writeText = mock(async (_value: string) => {})
     setClipboard(writeText)
     sessionCommand.mockImplementation((_sessionId, _command) =>

@@ -1,4 +1,5 @@
 import type { Session, TransportConnectionState } from '../../shared/types'
+import { i18n } from '@polo-ai/shared/i18n'
 
 interface MessageLoadMeta {
   messageCount?: number
@@ -92,5 +93,8 @@ export function shouldTreatSessionLoadFailureAsTransportFallback(
 export function formatSessionLoadFailure(error: unknown): string {
   if (error instanceof Error && error.message.trim()) return error.message
   if (typeof error === 'string' && error.trim()) return error
-  return 'Unknown error'
+  // Localized "unknown error" (renderer i18n is initialized at boot); the
+  // literal below only guards a non-initialized i18n instance.
+  const fallback = i18n.t('toast.unknownError')
+  return typeof fallback === 'string' && fallback ? fallback : 'Unknown error'
 }

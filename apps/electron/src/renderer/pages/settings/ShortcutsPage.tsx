@@ -127,9 +127,18 @@ function ActionShortcutRow({ actionId }: { actionId: ActionId }) {
 export default function ShortcutsPage() {
   const { t } = useTranslation()
   const componentSpecificSections = useComponentSpecificSections()
+  // The hotkey that opens this reference, straight from the action registry
+  const { hotkey: shortcutsHotkey } = useActionLabel('app.keyboardShortcuts')
   return (
     <div className="h-full flex flex-col">
       <PanelHeader title={t("settings.shortcuts.title")} />
+      <div className="px-5 pt-3 max-w-3xl mx-auto w-full">
+        <p className="text-sm text-muted-foreground">
+          {t("settings.shortcuts.readonlyHint", {
+            shortcut: shortcutsHotkey ?? (isMac ? '⌘/' : 'Ctrl+/'),
+          })}
+        </p>
+      </div>
       <div className="flex-1 min-h-0 mask-fade-y">
         <ScrollArea className="h-full">
           <div className="px-5 py-7 max-w-3xl mx-auto space-y-8">

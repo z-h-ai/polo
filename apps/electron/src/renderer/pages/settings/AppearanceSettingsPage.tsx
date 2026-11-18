@@ -157,6 +157,14 @@ export default function AppearanceSettingsPage() {
     loadThemes()
   }, [])
 
+  // Error-feedback friendliness: the UI shows a friendly, localized notice
+  // only; the raw technical diagnostic from ThemeContext stays in the console.
+  useEffect(() => {
+    if (themeLoadError) {
+      console.warn('[AppearanceSettingsPage] theme load error:', themeLoadError)
+    }
+  }, [themeLoadError])
+
   // Load workspace themes on mount
   useEffect(() => {
     const loadWorkspaceThemes = async () => {
@@ -293,7 +301,7 @@ export default function AppearanceSettingsPage() {
                 </SettingsCard>
                 {themeLoadError && (
                   <p className="mt-2 text-xs text-info">
-                    {t("settings.appearance.themeWarning")} {themeLoadError} ({themeResolvedFrom === 'fallback' ? t("settings.appearance.usingBundledFallback") : t("settings.appearance.usingDefaultTheme")})
+                    {t("settings.appearance.themeLoadFailed")} ({themeResolvedFrom === 'fallback' ? t("settings.appearance.usingBundledFallback") : t("settings.appearance.usingDefaultTheme")})
                   </p>
                 )}
               </SettingsSection>

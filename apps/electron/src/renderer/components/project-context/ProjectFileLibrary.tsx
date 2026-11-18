@@ -11,6 +11,7 @@ import { useTheme } from '@/hooks/useTheme'
 import type { FilePreviewState } from '@/hooks/useLinkInterceptor'
 import { readRpcErrorCode } from '../../../shared/rpc-error-bridge'
 import { AssetRow } from './AssetRow'
+import { basenameOfPath } from './asset-upload-prep'
 import { AssetUploadDialog, type AssetUploadInput } from './AssetUploadDialog'
 import { AssetReplaceDialog } from './AssetReplaceDialog'
 import { ProjectAssetPreviewOverlay } from './ProjectAssetPreviewOverlay'
@@ -123,6 +124,8 @@ export function ProjectFileLibrary({ scope, currentUserId, active = true, pinMut
     refresh,
     loadMore,
     loadMoreTrash,
+    timedOutIds,
+    recheckAsset,
     upsertAsset,
     removeAsset,
     refreshTrash,
@@ -346,7 +349,10 @@ export function ProjectFileLibrary({ scope, currentUserId, active = true, pinMut
     setBusyAssetId(asset.id)
     try {
       // v1 destination: the user's Downloads folder (no save-as RPC exists in
-      // the renderer bridge yet); the toast reveals the saved file.
+      // the renderer bridge yet); the toast reveals the saved file. The trusted
+      // side NEVER overwrites (Finder-style no-clobber ordinal), so a taken
+      // name comes back renamed — surface that instead of letting the file
+      // 「vanish」 into a (2) copy the user cannot find.
       const homeDir = await window.electronAPI.getHomeDir()
       const safeName = asset.name.replace(/[/\\:]+/g, '_')
       const targetPath = `${homeDir.replace(/\/+$/, '')}/Downloads/${safeName}`
@@ -357,12 +363,18 @@ export function ProjectFileLibrary({ scope, currentUserId, active = true, pinMut
         assetId: asset.id,
         targetPath,
       })
-      toast.success(t('projectContext.toast.downloaded', { name: asset.name }), {
+      const savedName = basenameOfPath(result.savedPath)
+      const reveal = {
         action: {
           label: t('projectContext.toast.reveal'),
           onClick: () => void window.electronAPI.showInFolder(result.savedPath),
         },
-      })
+      }
+      if (savedName !== safeName) {
+        toast.success(t('projectContext.toast.downloadedRenamed', { name: savedName }), reveal)
+      } else {
+        toast.success(t('projectContext.toast.downloaded', { name: asset.name }), reveal)
+      }
     } catch (error) {
       toast.error(t(projectContextErrorKey(error)))
     } finally {
@@ -675,6 +687,8 @@ export function ProjectFileLibrary({ scope, currentUserId, active = true, pinMut
               canManage={canManage}
               canReplace={canShare && !!currentUserId && asset.uploaderUserId === currentUserId}
               canIndexRetry={canManage || (!!currentUserId && asset.uploaderUserId === currentUserId)}
+              prepTimedOut={timedOutIds.has(asset.id)}
+              onRecheck={(target) => recheckAsset(target.id)}
               onPreview={handlePreview}
               onDownload={(target) => void handleDownload(target)}
               onReplace={handleReplace}

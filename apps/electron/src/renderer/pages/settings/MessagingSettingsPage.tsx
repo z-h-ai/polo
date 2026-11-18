@@ -53,6 +53,7 @@ import { TelegramConnectDialog } from '@/components/messaging/TelegramConnectDia
 import { LarkConnectDialog } from '@/components/messaging/LarkConnectDialog'
 import { TelegramSupergroupPairingDialog } from '@/components/messaging/TelegramSupergroupPairingDialog'
 import { WhatsAppConnectDialog } from '@/components/messaging/WhatsAppConnectDialog'
+import { useConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
   BindingAllowListPopover,
   TelegramAccessSection,
@@ -295,7 +296,9 @@ function PlatformRow({ platform, workspaceId }: { platform: Platform; workspaceI
       toast.success(t('toast.messagingTelegramUnlocked'))
       setTelegramAccessMode('open')
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('common.error'))
+      // Friendly failure copy; raw diagnostic stays in the console.
+      console.error('[MessagingSettings] unlock failed:', err)
+      toast.error(t('toast.messagingUnlockFailed'))
     }
   }
 
@@ -308,20 +311,34 @@ function PlatformRow({ platform, workspaceId }: { platform: Platform; workspaceI
         }),
       )
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('common.error'))
+      console.error('[MessagingSettings] disconnect failed:', err)
+      toast.error(t('toast.messagingDisconnectFailed'))
     }
   }
 
+  // Danger guard: "forget" wipes the saved sign-in state (WhatsApp: the paired
+  // session itself), so this leaf carries its own label AND a confirmation —
+  // the plain disconnect above stays one-click (reversible, keeps credentials).
+  const { requestConfirm: requestForgetConfirm, confirmElement: forgetConfirmElement } = useConfirmDialog()
+
   const handleForget = async () => {
+    const confirmed = await requestForgetConfirm({
+      testId: 'messaging-forget-confirm',
+      title: t('settings.messaging.forgetConfirmTitle'),
+      description: t('settings.messaging.forgetConfirmDescription', {
+        platform: t(PLATFORM_LABEL_KEYS[platform]),
+      }),
+      confirmLabel: t('settings.messaging.forgetAction'),
+    })
+    if (!confirmed) return
     try {
       await window.electronAPI.forgetMessagingPlatform(platform)
       toast.success(
-        t(`settings.messaging.${platform}.disconnected`, {
-          defaultValue: 'Disconnected',
-        }),
+        t('settings.messaging.forgetDone', { platform: t(PLATFORM_LABEL_KEYS[platform]) }),
       )
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('common.error'))
+      console.error('[MessagingSettings] forget failed:', err)
+      toast.error(t('toast.messagingForgetFailed'))
     }
   }
 
@@ -329,7 +346,8 @@ function PlatformRow({ platform, workspaceId }: { platform: Platform; workspaceI
     try {
       await window.electronAPI.unbindMessagingBinding(binding.id)
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('common.error'))
+      console.error('[MessagingSettings] unbind failed:', err)
+      toast.error(t('toast.messagingUnbindFailed'))
     }
   }
 
@@ -389,9 +407,9 @@ function PlatformRow({ platform, workspaceId }: { platform: Platform; workspaceI
                       <span>{t('common.disable')}</span>
                     </StyledDropdownMenuItem>
                     <StyledDropdownMenuSeparator />
-                    <StyledDropdownMenuItem onClick={handleForget} variant="destructive">
+                    <StyledDropdownMenuItem onClick={() => runAfterMenuClose(handleForget)} variant="destructive">
                       <Trash2 className="h-3.5 w-3.5" />
-                      <span>{t('common.disconnect')}</span>
+                      <span>{t('settings.messaging.forgetAction')}</span>
                     </StyledDropdownMenuItem>
                   </>
                 )}
@@ -427,7 +445,8 @@ function PlatformRow({ platform, workspaceId }: { platform: Platform; workspaceI
                   )
                   refreshSupergroup()
                 } catch (err) {
-                  toast.error(err instanceof Error ? err.message : t('common.error'))
+                  console.error('[MessagingSettings] supergroup unpair failed:', err)
+                  toast.error(t('toast.messagingUnpairFailed'))
                 }
               }}
               onOpenSession={(b) => navigateToSession(b.sessionId)}
@@ -473,6 +492,7 @@ function PlatformRow({ platform, workspaceId }: { platform: Platform; workspaceI
       {platform === 'lark' && (
         <LarkConnectDialog open={connectOpen} onOpenChange={setConnectOpen} reconfigure={reconfigure} />
       )}
+      {forgetConfirmElement}
     </>
   )
 }
@@ -535,7 +555,8 @@ function TelegramBindingsBody({
           ...(next.mode === 'allow-list' ? { allowedSenderIds: next.allowedSenderIds } : {}),
         })
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : t('settings.messaging.accessUpdateFailed'))
+        console.error('[MessagingSettings] access update failed:', err)
+        toast.error(t('settings.messaging.accessUpdateFailed'))
       }
     },
     [t],
@@ -865,7 +886,10 @@ function buildDescription(
     return t('dialog.whatsapp.starting', { defaultValue: 'Connecting…' })
   }
   if (runtime.state === 'error' && runtime.lastError) {
-    return runtime.lastError
+    // Raw adapter diagnostics are English and technical — keep them in the
+    // console and show a friendly, recoverable hint in the subtitle instead.
+    console.warn(`[MessagingSettings] ${platform} connection error:`, runtime.lastError)
+    return t('settings.messaging.connectionError')
   }
   return t(`settings.messaging.${platform}.notConnected`, { defaultValue: 'Not connected' })
 }

@@ -39,8 +39,9 @@ interface Harness {
   scripts: Record<string, UploadScript>
 }
 
-/** An in-flight upload the test resolves manually (for the cancel test). */
-let pendingGate: { resolve: () => void } | null = null
+/** An in-flight upload the test resolves manually (for the cancel tests).
+ * `rejectWith` simulates the transfer dying when the queue is torn down. */
+let pendingGate: { resolve: () => void; rejectWith?: Error } | null = null
 
 function mountHarness(scripts: Record<string, UploadScript>, overrides: Record<string, Uint8Array> = {}): Harness {
   const harness: Harness = { controller: null as never, uploads: [], cleanups: [], settled: [], scripts }
@@ -59,6 +60,7 @@ function mountHarness(scripts: Record<string, UploadScript>, overrides: Record<s
         if (pendingGate) {
           const gate = pendingGate
           await new Promise<void>((resolve) => { gate.resolve = resolve })
+          if (gate.rejectWith) throw gate.rejectWith
         }
         void overrides
       },
@@ -197,5 +199,35 @@ describe('useBatchUpload (POO-210)', () => {
     expect(harness.controller.entries.find((entry) => entry.displayName === 'later.md')?.status).toBe('pending')
     // The rewind means no settled report fired.
     expect(harness.settled).toHaveLength(0)
+  })
+
+  it('a cancel is not a failure: the stopped entry lands in the neutral cancelled state', async () => {
+    const harness = mountHarness({
+      'slow.md': { answers: ['ok'], calls: 0 },
+      'later.md': { answers: ['ok'], calls: 0 },
+    })
+    await doAct(() => harness.controller.beginFilesBatch(['/x/slow.md', '/x/later.md']))
+    // The in-flight transfer dies when the queue is torn down — the old code
+    // marked that entry FAILED (the ✗), which reads as "the upload broke".
+    pendingGate = { resolve: () => {}, rejectWith: Object.assign(new Error('aborted'), { code: 'pc_upload_failed' }) }
+    await doAct(() => harness.controller.startUpload())
+    await until(() => harness.controller.uploading)
+    await doAct(() => harness.controller.cancelUpload())
+    pendingGate.resolve()
+    await until(() => !harness.controller.uploading)
+    const slow = harness.controller.entries.find((entry) => entry.displayName === 'slow.md')
+    expect(slow?.status).toBe('cancelled')
+    // No failure copy on a cancelled row — it is the user's own stop.
+    expect(slow?.errorKey).toBeNull()
+    expect(harness.controller.failedCount).toBe(0)
+    expect(harness.controller.cancelledCount).toBe(1)
+    expect(harness.controller.entries.find((entry) => entry.displayName === 'later.md')?.status).toBe('pending')
+    expect(harness.settled).toHaveLength(0)
+
+    // The cancelled entry re-runs with the next start (only success is kept).
+    pendingGate = null
+    await doAct(() => harness.controller.startUpload())
+    await until(() => harness.controller.settled)
+    expect(harness.controller.entries.find((entry) => entry.displayName === 'slow.md')?.status).toBe('success')
   })
 })

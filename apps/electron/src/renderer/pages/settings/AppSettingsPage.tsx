@@ -181,9 +181,11 @@ export default function AppSettingsPage() {
       setProxyForm(form)
       setSavedProxyForm(form)
     } catch (error) {
-      // POO-179: keep the raw diagnostic in state; the self-produced failure
-      // copy resolves at render time from a stable error kind.
-      setProxyError(error instanceof Error ? error.message : 'proxyErrorSaveFailed')
+      // Error-feedback friendliness: the visible copy is always a stable,
+      // pre-localized kind (never a raw error.message). The raw diagnostic
+      // stays in the console for support.
+      console.error('Failed to save proxy settings:', error)
+      setProxyError('proxyErrorSaveFailed')
     } finally {
       setIsSavingProxy(false)
     }
@@ -238,6 +240,7 @@ export default function AppSettingsPage() {
                     <>
                       <SettingsInput
                         label={t("settings.network.httpProxyLabel")}
+                        description={t("settings.network.httpProxyInputDesc")}
                         value={proxyForm.httpProxy}
                         onChange={(value) => setProxyForm(prev => ({ ...prev, httpProxy: value }))}
                         placeholder={t("settings.network.proxyPlaceholder")}
@@ -245,6 +248,7 @@ export default function AppSettingsPage() {
                       />
                       <SettingsInput
                         label={t("settings.network.httpsProxyLabel")}
+                        description={t("settings.network.httpsProxyInputDesc")}
                         value={proxyForm.httpsProxy}
                         onChange={(value) => setProxyForm(prev => ({ ...prev, httpsProxy: value }))}
                         placeholder={t("settings.network.proxyPlaceholder")}
@@ -252,6 +256,7 @@ export default function AppSettingsPage() {
                       />
                       <SettingsInput
                         label={t("settings.network.bypassRules")}
+                        description={t("settings.network.bypassRulesDesc")}
                         value={proxyForm.noProxy}
                         onChange={(value) => setProxyForm(prev => ({ ...prev, noProxy: value }))}
                         placeholder={t("settings.network.bypassPlaceholder")}
@@ -262,7 +267,7 @@ export default function AppSettingsPage() {
                   {(isProxyDirty || proxyError) && (
                     <SettingsCardFooter>
                       {proxyError && (
-                        <span className="text-destructive text-sm mr-auto">{proxyError === 'proxyErrorProtocol' ? t("settings.network.proxyErrorProtocol") : proxyError === 'proxyErrorFormat' ? t("settings.network.proxyErrorFormat") : proxyError === 'proxyErrorSaveFailed' ? t("settings.network.proxySaveFailed") : proxyError}</span>
+                        <span className="text-destructive text-sm mr-auto">{proxyError === 'proxyErrorProtocol' ? t("settings.network.proxyErrorProtocol") : proxyError === 'proxyErrorFormat' ? t("settings.network.proxyErrorFormat") : t("settings.network.proxySaveFailed")}</span>
                       )}
                       <Button
                         variant="ghost"

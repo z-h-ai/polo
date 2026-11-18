@@ -170,6 +170,14 @@ export interface UseProjectAssetsResult {
   upsertAsset: (asset: PcAssetDto) => void
   /** Drop one asset from the local active list. */
   removeAsset: (assetId: string) => void
+  /**
+   * Assets whose bounded prep poll ran out its budget and gave up — the row
+   * stays processing server-side but the renderer stopped waiting. The badge
+   * uses this to say 「准备超时」 instead of an eternal 「正在准备」.
+   */
+  timedOutIds: ReadonlySet<string>
+  /** The timeout exit: re-arm THIS asset's poll now and clear its flag. */
+  recheckAsset: (assetId: string) => void
   refreshTrash: () => Promise<void>
   loadMoreTrash: () => Promise<void>
   upsertTrashAsset: (asset: PcAssetDto) => void
@@ -249,6 +257,26 @@ export function useProjectAssets({ scope, enabled, active = true }: UseProjectAs
   // armed chain survived and the other rows stayed 处理中 until a manual
   // refresh. Each asset's chain is now judged against its own token only.
   const pollTokensRef = React.useRef<Map<string, number>>(new Map())
+  // Poll-budget expiries (staged-feedback UX): a budgeted-out asset used to
+  // just stop polling and keep its 处理中 badge forever. The id set drives the
+  // explicit 「准备超时,点击重试」 badge + row-level recheck exit instead.
+  const [timedOutIds, setTimedOutIds] = React.useState<ReadonlySet<string>>(() => new Set<string>())
+  const markTimedOut = React.useCallback((assetId: string) => {
+    setTimedOutIds((prev) => {
+      if (prev.has(assetId)) return prev
+      const next = new Set(prev)
+      next.add(assetId)
+      return next
+    })
+  }, [])
+  const clearTimedOut = React.useCallback((assetId: string) => {
+    setTimedOutIds((prev) => {
+      if (!prev.has(assetId)) return prev
+      const next = new Set(prev)
+      next.delete(assetId)
+      return next
+    })
+  }, [])
 
   // Latest-value holders: the poll chain and list calls stay stable per scope
   // and read the live values through refs instead of re-binding on every state
@@ -338,10 +366,13 @@ export function useProjectAssets({ scope, enabled, active = true }: UseProjectAs
           : [asset, ...prev.assets],
       }
     })
+    // A row that left processing (any terminal state) is no longer timed out —
+    // whether the answer came from a poll, a recheck or a fresh list.
+    if (asset.current.processing !== 'processing') clearTimedOut(asset.id)
     if (asset.current.processing === 'processing' && !pollersRef.current.has(asset.id)) {
       schedulePoll(asset.id, PC_POLL_BASE_MS, 0, Date.now())
     }
-  }, [schedulePoll])
+  }, [schedulePoll, clearTimedOut])
 
   pollRunRef.current.run = async (assetId, attempts, startedAt) => {
     const currentScope = scopeRef.current
@@ -381,12 +412,22 @@ export function useProjectAssets({ scope, enabled, active = true }: UseProjectAs
       return
     }
     if (Date.now() - startedAt >= PC_POLL_BUDGET_MS) {
+      // Budget spent without a verdict: stop the silent wait, but say so —
+      // the row's badge becomes 「准备超时,点击重试」 with the recheck exit.
       stopPolling(assetId)
+      markTimedOut(assetId)
       return
     }
     const delay = Math.min(PC_POLL_BASE_MS * 2 ** Math.min(attempts, 4), PC_POLL_MAX_MS)
     schedulePoll(assetId, delay, attempts + 1, startedAt)
   }
+
+  /** The timeout exit: re-fetch THIS asset now (a fresh budget) and drop the
+   * timeout face. The poll algorithm itself is untouched. */
+  const recheckAsset = React.useCallback((assetId: string) => {
+    clearTimedOut(assetId)
+    schedulePoll(assetId, 0, 0, Date.now())
+  }, [clearTimedOut, schedulePoll])
 
   /** Starts polls for every still-processing row that has none yet. */
   const ensurePolling = React.useCallback((assets: readonly PcAssetDto[]) => {
@@ -442,8 +483,11 @@ export function useProjectAssets({ scope, enabled, active = true }: UseProjectAs
       if (seq !== requestSeq.current || scopeRef.current !== currentScope) return
       setPage(list)
       ensurePolling(list.assets)
-      // The authoritative page landed: later filter changes may re-fetch the
-      // list alone (capabilities stay put).
+      // The authoritative page landed: every processing row gets a fresh poll
+      // budget (ensurePolling re-arms the budgeted-out ones), so no row stays
+      // marked timed out from before the refresh.
+      setTimedOutIds(() => new Set())
+      // Later filter changes may re-fetch the list alone (capabilities stay put).
       listReadyRef.current = true
     } catch (error) {
       if (seq !== requestSeq.current || scopeRef.current !== currentScope) return
@@ -625,6 +669,8 @@ export function useProjectAssets({ scope, enabled, active = true }: UseProjectAs
     loadMore,
     upsertAsset,
     removeAsset,
+    timedOutIds,
+    recheckAsset,
     refreshTrash,
     loadMoreTrash,
     upsertTrashAsset,

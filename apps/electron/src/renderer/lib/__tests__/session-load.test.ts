@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'bun:test'
+import { i18n, setupI18n } from '@polo-ai/shared/i18n'
 import type { Session, TransportConnectionState } from '../../../shared/types'
 import { deriveSessionMessagesLoadState, formatSessionLoadFailure, isSessionSendBlockedByLoadState, shouldTreatSessionLoadFailureAsTransportFallback } from '../session-load'
+
+setupI18n()
 
 function createState(overrides?: Partial<TransportConnectionState>): TransportConnectionState {
   return {
@@ -175,7 +178,8 @@ describe('formatSessionLoadFailure', () => {
     expect(formatSessionLoadFailure(new Error('boom'))).toBe('boom')
   })
 
-  it('falls back to a generic message', () => {
-    expect(formatSessionLoadFailure(null)).toBe('Unknown error')
+  it('falls back to the localized unknown-error copy', () => {
+    expect(formatSessionLoadFailure(null)).toBe(i18n.t('toast.unknownError'))
+    expect(formatSessionLoadFailure(null)).not.toContain('toast.unknownError')
   })
 })

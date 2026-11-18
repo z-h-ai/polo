@@ -29,6 +29,11 @@ interface AdminLoginStepProps {
   onVerifyPhoneCode: (phone: string, code: string) => Promise<boolean>
   onSubmit: (identifier: string, password: string) => void
   onCancel?: () => void
+  /**
+   * Escape hatch for users who landed here by accident: invokes the existing
+   * app-quit channel (menu.QUIT). Presentation only — no auth state changes.
+   */
+  onQuitApp?: () => void
 }
 
 const STORY_POINTS = [
@@ -46,13 +51,16 @@ export function AdminLoginStep({
   onVerifyPhoneCode,
   onSubmit,
   onCancel,
+  onQuitApp,
 }: AdminLoginStepProps) {
   const { t } = useTranslation()
   const workbenchStyle = useClientWorkbenchStyle()
   const [identifier, setIdentifier] = useState("")
   const [password, setPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
-  const [consented, setConsented] = useState(true)
+  // Explicit consent: the agreement starts UNCHECKED and gates the submit
+  // button (the phone scenes already gate the same way via phone-auth-utils).
+  const [consented, setConsented] = useState(false)
   const [loginMode, setLoginMode] = useState<"phone" | "password">(
     resolvePreferredAdminLoginMode(phoneAuthEnabled),
   )
@@ -139,6 +147,18 @@ export function AdminLoginStep({
       />
 
       <section className="relative grid min-h-[570px] grid-cols-[1.08fr_0.92fr] overflow-hidden rounded-[24px] border border-border bg-surface shadow-modal-small client-material-card [@media(max-width:760px)]:grid-cols-1 [@media(max-width:760px)]:min-h-0 [@media(max-width:760px)]:rounded-[18px]">
+        {/* Quiet escape hatch (first-run card has no other exit): the existing
+        app-quit channel. Hidden while a login round-trip is in flight. */}
+        {onQuitApp && !isLoading ? (
+          <button
+            type="button"
+            data-testid="admin-login-quit-app"
+            onClick={onQuitApp}
+            className="absolute right-[18px] top-[16px] z-10 rounded-[8px] px-[10px] py-[5px] text-[13px] font-medium text-foreground-50 transition-colors hover:bg-foreground-5 hover:text-foreground client-material-action"
+          >
+            {t("onboarding.adminLogin.quitApp")}
+          </button>
+        ) : null}
         {/* === LEFT: brand story (prototype `.login-story`) === */}
         <div className="flex flex-col justify-between bg-foreground-3 p-[54px] client-material-brand [@media(max-width:760px)]:hidden">
           <div>
@@ -280,6 +300,18 @@ export function AdminLoginStep({
                     t("onboarding.adminLogin.continue")
                   )}
                 </button>
+
+                {/* Explicit-consent hint: the button above is disabled while
+                unchecked; this one-line note explains why (cleared on consent). */}
+                {!consented ? (
+                  <p
+                    data-testid="admin-login-consent-required"
+                    className="m-0 text-[13px] leading-[1.5] text-foreground-50"
+                    role="note"
+                  >
+                    {t("onboarding.adminLogin.consentRequired")}
+                  </p>
+                ) : null}
 
                 {isLoading && onCancel ? (
                   <button

@@ -19,6 +19,8 @@ export interface SessionListContextValue {
   onSelectSessionById: (sessionId: string) => void
   onOpenInNewWindow: (item: SessionMeta) => void
   onSendToWorkspace?: (sessionIds: string[]) => void
+  /** Ask before creating a share link (first-share confirm); owned by SessionList so the dialog outlives the menu. */
+  onShareRequest?: (item: SessionMeta) => void
   onFocusZone: () => void
   onKeyDown: (e: React.KeyboardEvent, item: SessionMeta) => void
 

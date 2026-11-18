@@ -255,20 +255,33 @@ describe('ShareToProjectDialog (POO-196 S-01)', () => {
     expect(shared[0]!.map((asset) => asset.name).sort()).toEqual(['spec.md', '验收要点.md'])
   })
 
-  it('a failing item names itself, keeps the earlier publishes, and never reports success', async () => {
+  it('a failing item no longer stops the run: the rest land, the failure is listed, and retry-failed completes the batch', async () => {
     // The text artifact keeps its default name here; the failure is keyed to it.
     const { harness, shared } = renderShare({ failNames: ['Message text.md'] })
 
     await screen.findByTestId('pc-share-item-att:att-1')
     fireEvent.click(screen.getByTestId('pc-share-submit'))
 
-    // First item published, second failed: the batch stops, the error names
-    // the failing item, and the parent success callback is never invoked.
-    const error = await screen.findByTestId('pc-share-error')
-    expect(error.textContent).toContain('Message text.md')
-    expect(error.textContent).toContain('Something went wrong')
-    expect(harness.uploads).toHaveLength(1)
+    // The failure does NOT abort the run: the attachment still published (the
+    // failed one never reached the wire), the failure is listed by name, the
+    // parent success callback never fired, and the selection narrowed to
+    // exactly the failed item.
+    const failures = await screen.findByTestId('pc-share-failures')
+    expect(failures.textContent).toContain('Message text.md')
+    expect(screen.getByTestId('pc-share-failure-item').textContent).toContain('Message text.md')
+    expect(harness.uploads.map((call) => call.name)).toEqual(['spec.md'])
     expect(shared).toHaveLength(0)
+    const check = screen.getByTestId('pc-share-item-check-att:att-1') as HTMLInputElement
+    expect(check.checked).toBe(false)
+
+    // The submit button became the retry-failed action; once the cause clears,
+    // the retry lands the missing item and reports EVERYTHING (both runs).
+    expect((screen.getByTestId('pc-share-submit').textContent ?? '').toLowerCase()).toContain('retry')
+    harness.failNames = []
+    fireEvent.click(screen.getByTestId('pc-share-submit'))
+    await waitFor(() => expect(shared).toHaveLength(1))
+    expect(shared[0]!.map((asset) => asset.name).sort()).toEqual(['Message text.md', 'spec.md'])
+    expect(screen.queryByTestId('pc-share-failures')).toBeNull()
   })
 
   it('R2-1: keeps the edits when the parent re-renders with an equal-value target, and re-derives on a real handover', async () => {
