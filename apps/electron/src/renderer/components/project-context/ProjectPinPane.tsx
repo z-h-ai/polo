@@ -36,9 +36,14 @@ export interface ProjectPinPaneProps {
   active?: boolean
   /** Called after any local mutation so the files tab can re-sync on return. */
   onChanged?: () => void
+  /**
+   * Empty-state CTA exit: switch the host to the files tab (the host's
+   * existing tab state — no new navigation). Absent = no CTA rendered.
+   */
+  onOpenFiles?: () => void
 }
 
-export function ProjectPinPane({ scope, active = true, onChanged }: ProjectPinPaneProps) {
+export function ProjectPinPane({ scope, active = true, onChanged, onOpenFiles }: ProjectPinPaneProps) {
   const { t } = useTranslation()
   const [capabilities, setCapabilities] = React.useState<PcCapabilitiesCompat | null>(null)
   const [capabilityState, setCapabilityState] = React.useState<PcCapabilityState>('idle')
@@ -228,6 +233,17 @@ export function ProjectPinPane({ scope, active = true, onChanged }: ProjectPinPa
           <Icons.Pin className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
           <p className="text-[13px] text-foreground">{t('projectContext.pin.emptyTitle')}</p>
           <p className="text-[12px] text-muted-foreground">{t('projectContext.pin.emptyHint')}</p>
+          {onOpenFiles && (
+            <Button
+              variant="outline"
+              className="mt-1 h-8 gap-1.5 px-3 text-[12px]"
+              onClick={onOpenFiles}
+              data-testid="pc-pin-empty-files"
+            >
+              <Icons.FolderOpen className="h-3.5 w-3.5" aria-hidden="true" />
+              {t('projectContext.pin.emptyCta')}
+            </Button>
+          )}
         </div>
       )}
 

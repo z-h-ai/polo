@@ -1269,6 +1269,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                       scope={projectScope}
                       active={projectPaneVisible && projectTab !== 'files'}
                       onChanged={handlePinsChanged}
+                      onOpenFiles={() => setProjectTab('files')}
                     />
                   </div>
                 </>
@@ -1399,6 +1400,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                   scope={projectScope}
                   active={projectPaneVisible && projectTab !== 'files'}
                   onChanged={handlePinsChanged}
+                  onOpenFiles={() => setProjectTab('files')}
                 />
               </div>
             </>

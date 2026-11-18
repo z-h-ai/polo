@@ -30,8 +30,10 @@ import { projectContextUploadErrorKey, type AssetUploadInput } from '../AssetUpl
  * the previous settles, so a failure never multiplies and the progress
  * counter reads honestly. Cancelling is honest about the wire: the
  * in-flight `pcUploadFile` cannot be revoked, so cancel lets THAT entry
- * settle (success or failure recorded), then stops the queue and rewinds to
- * review — nothing is silently dropped, the user retries or closes.
+ * settle (its real outcome recorded), then stops the queue and rewinds to
+ * review — nothing is silently dropped, the user retries or closes. A cancel
+ * is a user decision, not a fault: the stopped entry lands in the neutral
+ * `cancelled` state, kept apart from real failures.
  *
  * Lifecycle hygiene: the staging directory a zip batch created is cleaned up
  * when the dialog unmounts, and on the guarded close path via `stopForClose`.
@@ -40,7 +42,9 @@ import { projectContextUploadErrorKey, type AssetUploadInput } from '../AssetUpl
 
 export type BatchUploadPhase = 'review' | 'uploading' | 'settled'
 
-export type BatchUploadEntryStatus = 'pending' | 'uploading' | 'success' | 'failed'
+/** `cancelled` is deliberately separate from `failed`: the user stopped the
+ * queue — nothing broke, so the row gets a neutral face, never the ✗. */
+export type BatchUploadEntryStatus = 'pending' | 'uploading' | 'success' | 'failed' | 'cancelled'
 
 export interface BatchUploadEntry {
   entryId: string
@@ -67,8 +71,6 @@ export interface BatchUploadTotals {
   succeeded: number
   failed: number
 }
-
-const CANCELLED_ERROR_KEY = 'projectContext.upload.batch.cancelled'
 
 interface UseBatchUploadOptions {
   /** Null keeps the hook idle — the batch entries are hidden without it. */
@@ -274,7 +276,9 @@ export function useBatchUpload({ scope, maxUploadBytes, onSubmit, onSettled }: U
           succeeded += 1
         } catch (error) {
           if (signal.aborted) {
-            patchEntry(entry.entryId, { status: 'failed', errorKey: CANCELLED_ERROR_KEY })
+            // The user stopped the queue, not the file: a neutral 已取消
+            // state, never the failure ✗ (it reads as "the upload broke").
+            patchEntry(entry.entryId, { status: 'cancelled', errorKey: null })
             break
           }
           patchEntry(entry.entryId, { status: 'failed', errorKey: projectContextUploadErrorKey(error) })
@@ -373,6 +377,7 @@ export function useBatchUpload({ scope, maxUploadBytes, onSubmit, onSettled }: U
       .reduce((total, entry) => total + (entry.sizeBytes ?? 0), 0),
     doneCount: entries.filter((entry) => entry.status === 'success' || entry.status === 'failed').length,
     failedCount: entries.filter((entry) => entry.status === 'failed').length,
+    cancelledCount: entries.filter((entry) => entry.status === 'cancelled').length,
     // actions
     beginZipBatch,
     beginFolderBatch,

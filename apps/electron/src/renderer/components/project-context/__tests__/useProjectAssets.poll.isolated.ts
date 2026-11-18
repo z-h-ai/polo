@@ -146,4 +146,20 @@ describe('useProjectAssets processing poll concurrency (POO-196 R-2)', () => {
     // The failed tick is retried (and the retry lands the terminal answer).
     expect(getCalls.filter((call) => call.assetId === 'p-x').length).toBeGreaterThanOrEqual(2)
   })
+
+  it('recheckAsset re-fetches one asset immediately (the timeout exit) and timedOutIds starts clean', async () => {
+    const scripts: Record<string, AssetScript> = {
+      'p-r': { answers: [{ processing: 'processing' }], calls: 0 },
+    }
+    const { getCalls, handles } = mountPollHarness({ scripts })
+    expect(handles.result?.timedOutIds.size).toBe(0)
+
+    // Within the 1s base delay nothing has polled yet; the recheck fires NOW
+    // on its own (a fresh budget) without waiting for the backoff chain.
+    const before = getCalls.length
+    handles.result?.recheckAsset('p-r')
+    await sleep(200)
+    expect(getCalls.length).toBe(before + 1)
+    expect(getCalls.at(-1)?.assetId).toBe('p-r')
+  })
 })
