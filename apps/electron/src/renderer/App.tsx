@@ -290,9 +290,16 @@ function SessionLoadErrorScreen({
         <p className="mt-2 text-sm text-foreground/60">
           {t("errors.failedToLoadSessionsDesc")}
         </p>
-        <p className="mt-3 rounded-lg bg-foreground/5 px-3 py-2 text-left text-xs text-foreground/70 break-words">
-          {message}
-        </p>
+        {/* Raw technical diagnostic is opt-in: collapsed by default, expandable
+            so users can copy it when reporting an issue. */}
+        <details data-testid="session-load-error-details" className="mt-3 text-left">
+          <summary className="cursor-pointer select-none text-xs text-foreground/50 hover:text-foreground/70">
+            {t("errors.technicalDetails")}
+          </summary>
+          <pre className="mt-2 rounded-lg bg-foreground/5 px-3 py-2 text-left text-xs text-foreground/70 break-words whitespace-pre-wrap">
+            {message}
+          </pre>
+        </details>
         <button
           type="button"
           onClick={onRetry}

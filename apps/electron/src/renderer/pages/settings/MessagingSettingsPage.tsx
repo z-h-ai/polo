@@ -295,7 +295,9 @@ function PlatformRow({ platform, workspaceId }: { platform: Platform; workspaceI
       toast.success(t('toast.messagingTelegramUnlocked'))
       setTelegramAccessMode('open')
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('common.error'))
+      // Friendly failure copy; raw diagnostic stays in the console.
+      console.error('[MessagingSettings] unlock failed:', err)
+      toast.error(t('toast.messagingUnlockFailed'))
     }
   }
 
@@ -308,7 +310,8 @@ function PlatformRow({ platform, workspaceId }: { platform: Platform; workspaceI
         }),
       )
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('common.error'))
+      console.error('[MessagingSettings] disconnect failed:', err)
+      toast.error(t('toast.messagingDisconnectFailed'))
     }
   }
 
@@ -321,7 +324,8 @@ function PlatformRow({ platform, workspaceId }: { platform: Platform; workspaceI
         }),
       )
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('common.error'))
+      console.error('[MessagingSettings] forget failed:', err)
+      toast.error(t('toast.messagingForgetFailed'))
     }
   }
 
@@ -329,7 +333,8 @@ function PlatformRow({ platform, workspaceId }: { platform: Platform; workspaceI
     try {
       await window.electronAPI.unbindMessagingBinding(binding.id)
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('common.error'))
+      console.error('[MessagingSettings] unbind failed:', err)
+      toast.error(t('toast.messagingUnbindFailed'))
     }
   }
 
@@ -427,7 +432,8 @@ function PlatformRow({ platform, workspaceId }: { platform: Platform; workspaceI
                   )
                   refreshSupergroup()
                 } catch (err) {
-                  toast.error(err instanceof Error ? err.message : t('common.error'))
+                  console.error('[MessagingSettings] supergroup unpair failed:', err)
+                  toast.error(t('toast.messagingUnpairFailed'))
                 }
               }}
               onOpenSession={(b) => navigateToSession(b.sessionId)}
@@ -535,7 +541,8 @@ function TelegramBindingsBody({
           ...(next.mode === 'allow-list' ? { allowedSenderIds: next.allowedSenderIds } : {}),
         })
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : t('settings.messaging.accessUpdateFailed'))
+        console.error('[MessagingSettings] access update failed:', err)
+        toast.error(t('settings.messaging.accessUpdateFailed'))
       }
     },
     [t],
@@ -865,7 +872,10 @@ function buildDescription(
     return t('dialog.whatsapp.starting', { defaultValue: 'Connecting…' })
   }
   if (runtime.state === 'error' && runtime.lastError) {
-    return runtime.lastError
+    // Raw adapter diagnostics are English and technical — keep them in the
+    // console and show a friendly, recoverable hint in the subtitle instead.
+    console.warn(`[MessagingSettings] ${platform} connection error:`, runtime.lastError)
+    return t('settings.messaging.connectionError')
   }
   return t(`settings.messaging.${platform}.notConnected`, { defaultValue: 'Not connected' })
 }
