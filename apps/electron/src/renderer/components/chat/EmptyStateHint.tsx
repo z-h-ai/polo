@@ -215,19 +215,6 @@ export function EmptyStateHint({ hintIndex, className }: EmptyStateHintProps) {
 }
 
 /**
- * Plain-text form of a hint template — entity tokens collapse to their
- * labels, so the result is a sendable sentence (click-to-fill surfaces).
- */
-export function getHintPlainText(t: (key: string) => string, templateKey: string): string {
-  return parseHintTemplate(t(templateKey), templateKey)
-    .segments
-    .map(segment => segment.type === 'text' ? segment.content : segment.label)
-    .join('')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-/**
  * Get the total number of available hints (for playground variant generation)
  */
 export function getHintCount(): number {
