@@ -51,6 +51,7 @@ import {
   DropdownMenu,
   DropdownMenuTrigger,
   StyledDropdownMenuItem,
+  StyledDropdownMenuSeparator,
 } from "@/components/ui/styled-dropdown"
 import { CurrentProductSpaceLabel } from "@/components/product-space/ProductSpaceSwitcher"
 import { WorkbenchAccountMenu } from "../app-menu/WorkbenchAccountMenu"
@@ -239,6 +240,14 @@ export function TopBar() {
     navigate(routes.view.allSessions(sessionId))
   }
 
+  // Overflow entry for the capped notification list: the sessions navigator
+  // lives in the Polo tab, so bring it forward when it's already open (same
+  // tab-focus contract as openSessionFromNotification).
+  const openAllSessionsFromNotifications = () => {
+    if (openPoloTab) activateTab(openPoloTab.id)
+    navigate(routes.view.allSessions())
+  }
+
   return (
     <div
       data-testid="app-topbar"
@@ -388,17 +397,35 @@ export function TopBar() {
                 {t("topbar.notifications.empty")}
               </div>
             ) : (
-              visibleUnreadSessions.map((meta) => (
-                <StyledDropdownMenuItem
-                  key={meta.id}
-                  onClick={() => openSessionFromNotification(meta.id)}
-                >
-                  <span className="min-w-0 flex-1 truncate">{getSessionTitle(meta)}</span>
-                  {visibleUnreadSessions.length > 1 && (
-                    <ChevronRight className="h-3 w-3 text-muted-foreground" />
-                  )}
-                </StyledDropdownMenuItem>
-              ))
+              <>
+                {visibleUnreadSessions.map((meta) => (
+                  <StyledDropdownMenuItem
+                    key={meta.id}
+                    onClick={() => openSessionFromNotification(meta.id)}
+                  >
+                    <span className="min-w-0 flex-1 truncate">{getSessionTitle(meta)}</span>
+                    {visibleUnreadSessions.length > 1 && (
+                      <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                    )}
+                  </StyledDropdownMenuItem>
+                ))}
+                {/* Only when the list was actually truncated — nothing to
+                    "see more" when every unread item is already shown. */}
+                {unreadSessions.length > visibleUnreadSessions.length && (
+                  <>
+                    <StyledDropdownMenuSeparator />
+                    <StyledDropdownMenuItem
+                      data-testid="topbar-notifications-view-all"
+                      onClick={openAllSessionsFromNotifications}
+                    >
+                      <span className="min-w-0 flex-1 text-muted-foreground">
+                        {t("topbar.notifications.viewAllSessions")}
+                      </span>
+                      <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                    </StyledDropdownMenuItem>
+                  </>
+                )}
+              </>
             )}
           </WorkbenchMenuContent>
         </DropdownMenu>

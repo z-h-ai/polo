@@ -123,6 +123,15 @@ export function WorkspacePicker({ onSelectWorkspace }: WorkspacePickerProps) {
           </div>
         )}
 
+        {/* Empty state: explain why no list is shown and point at the
+            create form below. Suppressed on a failed load — the retry
+            affordance above owns that case (the list may not be empty). */}
+        {workspaces.length === 0 && !error && (
+          <p className="mt-5 w-full text-center text-sm text-muted-foreground">
+            {t("workspace.noWorkspacesYet")}
+          </p>
+        )}
+
         {/* Divider */}
         <div className="mt-5 mb-4 w-full border-t" />
 

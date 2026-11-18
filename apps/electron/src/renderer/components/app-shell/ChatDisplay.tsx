@@ -67,6 +67,7 @@ import {
   type AuthRequestTurn,
 } from "@polo-ai/ui"
 import { MemoizedAuthRequestCard } from "@/components/chat/AuthRequestCard"
+import { EmptySessionGuidance } from "@/components/chat/EmptySessionGuidance"
 import { ElementReferenceChips } from "@/components/chat/ElementReferenceChips"
 import { ProjectAssetChip } from "@/components/project-context/ProjectAssetChip"
 import type { ProjectAssetMentionDraft } from "@/atoms/project-context"
@@ -1892,6 +1893,15 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                     <div className="absolute inset-0 flex flex-col items-center justify-center select-none gap-1 pointer-events-none">
                       <span className="text-sm text-muted-foreground">{t("editPopover.whatToChange")}</span>
                       <span className="text-xs text-muted-foreground/50">{t("editPopover.justDescribe")}</span>
+                    </div>
+                  )}
+                  {/* Desktop empty session: the "what can I do" example prompts
+                      (playground-only until now). wrapper stays pointer-events-none
+                      so the empty scroll area keeps native behavior; the cards
+                      re-enable it for clicks. */}
+                  {!compactMode && turns.length === 0 && !hasUnrenderedLoadedMessages && !isSearchActive && !session.isProcessing && (
+                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-6">
+                      <EmptySessionGuidance sessionId={session.id} className="pointer-events-auto" />
                     </div>
                   )}
                   {!compactMode && hasUnrenderedLoadedMessages && (

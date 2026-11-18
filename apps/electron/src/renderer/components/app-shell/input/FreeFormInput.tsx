@@ -2057,6 +2057,9 @@ export function FreeFormInput({
           {/* Status slot overlay - escape interrupt (highest priority), browser status, etc. */}
           <ToolbarStatusSlot
             showEscapeOverlay={isProcessing && showEscapeOverlay}
+            // The desktop-only persistent interrupt hint; the compact toolbar
+            // is too squeezed for an ambient line.
+            showEscHint={isProcessing && !compactMode}
             sessionId={sessionId}
           />
 
