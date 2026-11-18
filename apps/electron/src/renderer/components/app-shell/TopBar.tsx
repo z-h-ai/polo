@@ -54,6 +54,7 @@ import {
   StyledDropdownMenuSeparator,
 } from "@/components/ui/styled-dropdown"
 import { CurrentProductSpaceLabel } from "@/components/product-space/ProductSpaceSwitcher"
+import { useConfirmDialog } from "@/components/ui/confirm-dialog"
 import { WorkbenchAccountMenu } from "../app-menu/WorkbenchAccountMenu"
 import { POLO_TAB_ID, type TabInstance } from "../../../shared/tab-browser-types"
 import { localizedTabTitle } from "@/lib/tab-display-name"
@@ -212,6 +213,14 @@ export function TopBar() {
   const user = appShell?.currentAdminUser ?? null
   const userLabel = user?.displayName || user?.username || ""
   const userInitial = userLabel.trim().charAt(0)
+
+  // UX danger guard: "Log out" one-click revokes the space context, signs out
+  // AND clears every local account-scoped projection (App.resetAccountScopedClientState)
+  // while stopping running executions — far too costly for a mis-click. The
+  // ask lives HERE (not inside the dropdown content) because Radix unmounts
+  // the menu on close; the bar outlives it, same lifetime argument as the
+  // payment handoff above.
+  const { requestConfirm: requestLogoutConfirm, confirmElement: logoutConfirmElement } = useConfirmDialog()
 
   // POO-205 Spec §10 / C4 (A): in an ENTERPRISE committed space the Polo tab
   // retires — chat lives ONLY inside project tabs (title = project name). The
@@ -453,9 +462,20 @@ export function TopBar() {
               onOpenPayment={() => { void openPayment() }}
               canOpenEnterpriseWorkflows={canOpenEnterpriseWorkflows}
               onOpenEnterpriseWorkflow={(workflow) => { void openEnterpriseWorkflow(workflow) }}
+              onLogoutRequest={() => {
+                void requestLogoutConfirm({
+                  testId: "topbar-logout-confirm",
+                  title: t("topbar.account.logoutConfirmTitle", { name: userLabel }),
+                  description: t("topbar.account.logoutConfirmDescription"),
+                  confirmLabel: t("topbar.account.logout"),
+                  onConfirm: () => appShell?.onAdminLogout?.(),
+                })
+              }}
             />
           </WorkbenchMenuContent>
         </DropdownMenu>
+
+        {logoutConfirmElement}
       </div>
     </div>
   )
