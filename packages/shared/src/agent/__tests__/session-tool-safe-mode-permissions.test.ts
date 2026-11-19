@@ -18,6 +18,13 @@ describe('session tool safe-mode classification', () => {
       // metadata — safe mode must classify it by that metadata (visibility
       // is enforced separately by the toolset + capability gate).
       'mcp__session__request_user_input',
+      // project_context_* (POO-196) carry safeMode 'allow' + readOnly in the
+      // canonical metadata. Their allowProjectContext flag is VISIBILITY
+      // (toolset assembly) — the safe-mode classification must still admit
+      // them, or a project-bound Explore-mode turn gets its read-only
+      // search/read rejected as a session configuration change (POO-214).
+      'mcp__session__project_context_search',
+      'mcp__session__project_context_read',
     ] as const;
 
     for (const toolName of allowedTools) {
