@@ -40,6 +40,23 @@ const SDK_AUTOCOMPACT_RACE_SIGNATURE = /_autoCompactionAbortController\.signal/;
  *  serialization — 5 s is well above any plausible jitter. */
 const OVERFLOW_FALLBACK_TIMEOUT_MS = 5_000;
 
+/** How long the `compacting` state may run without a `compaction_end` before
+ *  we force-drain the queue. Real compactions legitimately take 60–120 s (GPT)
+ *  and pi-agent-server waits up to 300 s (`waitForCompaction`), so the ceiling
+ *  sits just above that — a `compaction_end` that never arrives means the
+ *  event stream dropped it, and holding the queue open forever leaves the UI
+ *  stuck on the loading indicator (POO-218). */
+const OVERFLOW_COMPACTION_TIMEOUT_MS = 330_000;
+
+/** How long the `recovering` state may wait for the recovered turn to START
+ *  (an SDK `turn_start`) after a successful compaction. The SDK schedules
+ *  `agent.continue()` 100 ms after `compaction_end`; if the continuation is
+ *  swallowed (`agent.continue().catch(() => {})` in the SDK) no new turn ever
+ *  arrives and the queue would stay open forever. Once the recovered turn
+ *  starts, the timer is cancelled — a legitimately long recovered turn is not
+ *  bound by this. */
+const OVERFLOW_RECOVERY_START_TIMEOUT_MS = 30_000;
+
 /**
  * Combined event type the adapter can handle.
  * AgentSessionEvent is a superset of PiAgentEvent (adds compaction_*, auto_retry_*, queue_update).
@@ -162,22 +179,61 @@ export class PiEventAdapter extends BaseEventAdapter {
     this.pendingQueueComplete = false;
   }
 
-  private armOverflowFallbackTimer(): void {
+  private armOverflowFallbackTimer(timeoutMs: number): void {
     this.cancelOverflowFallbackTimer();
     this.fallbackTimerId = setTimeout(() => {
       this.fallbackTimerId = null;
-      // Re-check state at fire time — a late `compaction_start` may have
-      // already transitioned us to `compacting`.
-      if (this.overflowState !== 'awaiting') return;
-      const errorMessage = this.heldOverflowError ?? 'Context overflow';
-      this.heldOverflowError = null;
-      this.overflowState = 'none';
-      this.log.warn('Overflow recovery fallback fired — SDK emitted no compaction events', {
-        timeoutMs: OVERFLOW_FALLBACK_TIMEOUT_MS,
-      });
-      this.onFallbackEvent?.({ type: 'error', message: errorMessage });
-      this.onFallbackComplete?.();
-    }, OVERFLOW_FALLBACK_TIMEOUT_MS);
+      // Re-check state at fire time — recovery may have progressed (or been
+      // reset by a new turn) since this timer was armed.
+      switch (this.overflowState) {
+        case 'awaiting': {
+          const errorMessage = this.heldOverflowError ?? 'Context overflow';
+          this.heldOverflowError = null;
+          this.overflowState = 'none';
+          this.log.warn('Overflow recovery fallback fired — SDK emitted no compaction events', {
+            timeoutMs: OVERFLOW_FALLBACK_TIMEOUT_MS,
+          });
+          this.onFallbackEvent?.({ type: 'error', message: errorMessage });
+          this.onFallbackComplete?.();
+          break;
+        }
+        case 'compacting': {
+          // The compaction itself never reported back (event lost / process
+          // wedged without exiting). Surface the held error and drain —
+          // otherwise the queue never completes and the UI loads forever.
+          this.overflowState = 'none';
+          const errorMessage = this.heldOverflowError ?? 'Context overflow';
+          this.heldOverflowError = null;
+          this.log.warn('Overflow recovery fallback fired — compaction did not report back', {
+            timeoutMs: OVERFLOW_COMPACTION_TIMEOUT_MS,
+          });
+          this.onFallbackEvent?.({
+            type: 'error',
+            message: `${errorMessage} Context compaction did not complete in time. Try /compact manually or resend your message.`,
+          });
+          this.onFallbackComplete?.();
+          break;
+        }
+        case 'recovering': {
+          // Compaction succeeded but the SDK's `agent.continue()` retry never
+          // produced a new turn (the SDK swallows continuation errors). Drain
+          // so the turn ends with a visible hint instead of an eternal spinner.
+          this.overflowState = 'none';
+          this.log.warn('Overflow recovery fallback fired — recovered turn never started', {
+            timeoutMs: OVERFLOW_RECOVERY_START_TIMEOUT_MS,
+          });
+          this.onFallbackEvent?.({
+            type: 'error',
+            message: 'Context was compacted, but the retried response did not start. Please resend your message.',
+          });
+          this.onFallbackComplete?.();
+          break;
+        }
+        default:
+          // 'none' or 'held' — nothing to drain.
+          break;
+      }
+    }, timeoutMs);
   }
 
   private cancelOverflowFallbackTimer(): void {
@@ -206,6 +262,18 @@ export class PiEventAdapter extends BaseEventAdapter {
   }
 
   protected onTurnStart(): void {
+    // A turn interrupted mid-recovery (user Stop, redirect, abort) leaves the
+    // overflow state latched — the queue for THAT turn is already closed by
+    // the abort path, but the residue would suppress `complete` on every
+    // future `agent_end`, latching the next turn onto the eternal spinner
+    // (POO-218). Recovery always re-arms from a fresh overflow `message_end`,
+    // so clearing here cannot break a flow in progress.
+    if (this.overflowState !== 'none') {
+      this.log.warn('Clearing stale overflow-recovery state at turn start', {
+        state: this.overflowState,
+      });
+      this.resetOverflowState();
+    }
     this.toolNames.clear();
     this.hasStreamedDeltas = false;
     this.hasEmittedFinalText = false;
@@ -250,7 +318,7 @@ export class PiEventAdapter extends BaseEventAdapter {
         // turn will arrive as a fresh agent_start … agent_end pair.
         if (this.overflowState === 'held') {
           this.overflowState = 'awaiting';
-          this.armOverflowFallbackTimer();
+          this.armOverflowFallbackTimer(OVERFLOW_FALLBACK_TIMEOUT_MS);
           break;
         }
         if (this.overflowState === 'awaiting' || this.overflowState === 'compacting') {
@@ -262,6 +330,7 @@ export class PiEventAdapter extends BaseEventAdapter {
         if (this.overflowState === 'recovering') {
           // Recovered turn just finished — fall through to normal completion.
           this.overflowState = 'none';
+          this.cancelOverflowFallbackTimer();
         }
         if (this.lastUsage) {
           const inputTokens = this.lastUsage.input + (this.lastUsage.cacheRead || 0);
@@ -286,6 +355,13 @@ export class PiEventAdapter extends BaseEventAdapter {
       // ============================================================
 
       case 'turn_start':
+        // Overflow recovery: a `turn_start` while `recovering` means the SDK's
+        // post-compaction `agent.continue()` retry actually started — cancel
+        // the "continuation never started" fallback so a legitimately long
+        // recovered turn isn't cut off (POO-218).
+        if (this.overflowState === 'recovering') {
+          this.cancelOverflowFallbackTimer();
+        }
         // Pi SDK turn_start has no ID, so generate one for event correlation
         this.currentTurnId = `pi-turn-${this.turnIndex}`;
         break;
@@ -538,12 +614,14 @@ export class PiEventAdapter extends BaseEventAdapter {
       // ============================================================
 
       case 'compaction_start':
-        // Cancel the overflow fallback timer — the SDK is now actively
-        // recovering, so we no longer need the "no compaction event arrived"
-        // safety net. State transitions: held|awaiting → compacting.
+        // The SDK is now actively recovering, but compaction can legitimately
+        // take minutes — arm a ceiling just above pi-agent-server's
+        // `waitForCompaction` (300 s) so a lost `compaction_end` can't hold
+        // the queue open forever (POO-218). State transitions:
+        // held|awaiting → compacting.
         if (this.overflowState === 'held' || this.overflowState === 'awaiting') {
-          this.cancelOverflowFallbackTimer();
           this.overflowState = 'compacting';
+          this.armOverflowFallbackTimer(OVERFLOW_COMPACTION_TIMEOUT_MS);
         }
         // Use "Compacting" keyword so session handler detects statusType: 'compacting'
         yield { type: 'status', message: 'Compacting context...' };
@@ -558,6 +636,13 @@ export class PiEventAdapter extends BaseEventAdapter {
           if (this.overflowState === 'compacting') {
             this.overflowState = 'recovering';
             this.heldOverflowError = null;
+            // The SDK schedules `agent.continue()` ~100 ms from now, but it
+            // swallows continuation errors (`.catch(() => {})`) — if the
+            // retry never starts, nothing else would ever drain the queue.
+            // Cancel the compaction ceiling and arm the shorter
+            // "continuation started?" window instead (POO-218). A recovered
+            // `turn_start` cancels it; the final agent_end lands normally.
+            this.armOverflowFallbackTimer(OVERFLOW_RECOVERY_START_TIMEOUT_MS);
           }
           // Use "Compacted" keyword so session handler detects statusType: 'compaction_complete'
           yield { type: 'info', message: 'Compacted context to fit within limits' };
@@ -596,6 +681,33 @@ export class PiEventAdapter extends BaseEventAdapter {
             this.heldOverflowError = null;
             this.cancelOverflowFallbackTimer();
           }
+        } else if (
+          this.overflowState === 'compacting' ||
+          this.overflowState === 'awaiting' ||
+          this.overflowState === 'held'
+        ) {
+          // Neutral payload: no result, no errorMessage. The SDK emits these
+          // when compaction is aborted OR when its preparation fails silently
+          // (no model registered, auth resolution failed, nothing to compact)
+          // — none of those paths produce a recovered agent_end, so waiting
+          // for one left the queue open forever with the UI stuck on the
+          // loading spinner (POO-218). Drain the held overflow instead; the
+          // original error is surfaced so the failure isn't silent. An
+          // aborted compaction means the user stopped the turn — the abort
+          // path already closes the queue, so no synthetic error is added.
+          const wasAborted = Boolean(compactionEvent.aborted);
+          const errorMessage = this.heldOverflowError ?? 'Context overflow';
+          this.pendingQueueComplete = true;
+          this.overflowState = 'none';
+          this.heldOverflowError = null;
+          this.cancelOverflowFallbackTimer();
+          if (!wasAborted) {
+            this.log.warn('Compaction ended without result or error — draining held overflow', {
+              aborted: compactionEvent.aborted,
+            });
+            yield { type: 'error', message: errorMessage };
+          }
+          yield { type: 'complete' };
         }
         break;
       }

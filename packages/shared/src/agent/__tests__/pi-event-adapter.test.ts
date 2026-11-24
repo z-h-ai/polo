@@ -1311,5 +1311,163 @@ describe('PiEventAdapter', () => {
       expect(allMessages).not.toMatch(/_autoCompactionAbortController/);
       expect(adapter.shouldCompleteQueue(false)).toBe(true);
     });
+
+    // POO-218: the SDK emits compaction_end with NO result and NO errorMessage
+    // when compaction is aborted or its preparation fails silently (no model,
+    // auth resolution failure, nothing compactable). Those paths never produce
+    // a recovered agent_end, so the adapter must drain the queue itself or the
+    // UI stays on the loading spinner forever.
+    it('neutral compaction_end (preparation failure): surfaces held overflow + completes', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      collect(adapter.adaptEvent({ type: 'message_end', message: overflowMessage } as any));
+      collect(adapter.adaptEvent({ type: 'agent_end' } as any));
+      collect(adapter.adaptEvent({ type: 'compaction_start' } as any));
+
+      const events = collect(adapter.adaptEvent({
+        type: 'compaction_end',
+        result: undefined,
+        aborted: false,
+        // no errorMessage — SDK's no-model / auth-failure / no-preparation paths
+      } as any));
+
+      expect(events).toEqual([
+        { type: 'error', message: overflowMessage.errorMessage },
+        { type: 'complete' },
+      ]);
+      expect(adapter.shouldCompleteQueue(false)).toBe(true);
+      expect(adapter.shouldCompleteQueue(false)).toBe(false);
+    });
+
+    it('neutral compaction_end (aborted): completes without a synthetic error', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      collect(adapter.adaptEvent({ type: 'message_end', message: overflowMessage } as any));
+      collect(adapter.adaptEvent({ type: 'agent_end' } as any));
+      collect(adapter.adaptEvent({ type: 'compaction_start' } as any));
+
+      const events = collect(adapter.adaptEvent({
+        type: 'compaction_end',
+        result: undefined,
+        aborted: true,
+      } as any));
+
+      // User-initiated stop already closes the queue on the abort path —
+      // don't stack a synthetic error on top of an intentional interrupt.
+      expect(events).toEqual([{ type: 'complete' }]);
+      expect(adapter.shouldCompleteQueue(false)).toBe(true);
+    });
+
+    it('recovery never starts: fallback drains after the continuation window', () => {
+      jest.useFakeTimers();
+      try {
+        const enqueued: any[] = [];
+        let completed = false;
+        adapter.setOverflowFallbackHandlers(
+          (event) => enqueued.push(event),
+          () => { completed = true; },
+        );
+
+        collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+        collect(adapter.adaptEvent({ type: 'message_end', message: overflowMessage } as any));
+        collect(adapter.adaptEvent({ type: 'agent_end' } as any));
+        collect(adapter.adaptEvent({ type: 'compaction_start' } as any));
+        collect(adapter.adaptEvent({
+          type: 'compaction_end',
+          result: { summary: 'compact' },
+          aborted: false,
+        } as any));
+
+        // Compaction succeeded; SDK's agent.continue() retry is swallowed —
+        // no turn_start ever arrives. Advance past the 30 s start window.
+        jest.advanceTimersByTime(30_000);
+
+        expect(enqueued).toHaveLength(1);
+        expect(enqueued[0].type).toBe('error');
+        expect(completed).toBe(true);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('recovery starts: turn_start cancels the continuation fallback, agent_end completes', () => {
+      jest.useFakeTimers();
+      try {
+        const enqueued: any[] = [];
+        let completed = false;
+        adapter.setOverflowFallbackHandlers(
+          (event) => enqueued.push(event),
+          () => { completed = true; },
+        );
+
+        collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+        collect(adapter.adaptEvent({ type: 'message_end', message: overflowMessage } as any));
+        collect(adapter.adaptEvent({ type: 'agent_end' } as any));
+        collect(adapter.adaptEvent({ type: 'compaction_start' } as any));
+        collect(adapter.adaptEvent({
+          type: 'compaction_end',
+          result: { summary: 'compact' },
+          aborted: false,
+        } as any));
+
+        // Recovered turn starts — the fallback must not fire later.
+        collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+        jest.advanceTimersByTime(60_000);
+        expect(enqueued).toHaveLength(0);
+        expect(completed).toBe(false);
+
+        const finalAgentEnd = collect(adapter.adaptEvent({ type: 'agent_end' } as any));
+        expect(finalAgentEnd).toMatchObject([{ type: 'complete' }]);
+        expect(adapter.shouldCompleteQueue(true)).toBe(true);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('compaction never reports back: ceiling drains the queue (330 s)', () => {
+      jest.useFakeTimers();
+      try {
+        const enqueued: any[] = [];
+        let completed = false;
+        adapter.setOverflowFallbackHandlers(
+          (event) => enqueued.push(event),
+          () => { completed = true; },
+        );
+
+        collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+        collect(adapter.adaptEvent({ type: 'message_end', message: overflowMessage } as any));
+        collect(adapter.adaptEvent({ type: 'agent_end' } as any));
+        collect(adapter.adaptEvent({ type: 'compaction_start' } as any));
+
+        // Legitimate slow compaction stays under the ceiling.
+        jest.advanceTimersByTime(300_000);
+        expect(completed).toBe(false);
+
+        // Past the ceiling with no compaction_end — drain.
+        jest.advanceTimersByTime(30_000);
+        expect(enqueued).toHaveLength(1);
+        expect(enqueued[0].type).toBe('error');
+        expect(completed).toBe(true);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('interrupted recovery leaves no residue: next turn completes normally', () => {
+      // Turn 1 gets stuck mid-recovery, then the abort path closes its queue
+      // without the adapter seeing a terminal event — the latched state must
+      // not suppress `complete` on the NEXT turn's agent_end (POO-218).
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      collect(adapter.adaptEvent({ type: 'message_end', message: overflowMessage } as any));
+      collect(adapter.adaptEvent({ type: 'agent_end' } as any));
+      collect(adapter.adaptEvent({ type: 'compaction_start' } as any));
+      // Queue force-closed by abort; state stays 'compacting'.
+
+      // Next turn: startTurn() must clear the stale state.
+      adapter.startTurn();
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+
+      const agentEndEvents = collect(adapter.adaptEvent({ type: 'agent_end' } as any));
+      expect(agentEndEvents).toMatchObject([{ type: 'complete' }]);
+      expect(adapter.shouldCompleteQueue(true)).toBe(true);
+    });
   });
 });
